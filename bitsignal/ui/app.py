@@ -1,12 +1,21 @@
 """Interactive local Streamlit dashboard for BitSignal."""
 
+import argparse
 import os
 import sqlite3
+import sys
+from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-DB_PATH = os.getenv("DATABASE_PATH", "./data/bitsignal.db")
+# Ensure repository root is in sys.path (needed for Streamlit Cloud deployment)
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+DEFAULT_DB_PATH = str(ROOT_DIR / "data" / "bitsignal.db")
+DB_PATH = os.getenv("DATABASE_PATH", DEFAULT_DB_PATH)
 
 st.set_page_config(
     page_title="BitSignal - Bitcoin Macro Cycle Sentinel",
@@ -35,10 +44,12 @@ def ensure_data_available():
     df_scores, df_metrics, df_alerts = load_data()
     if df_scores is None or df_scores.empty:
         with st.spinner("Inicializando dados de mercado ao vivo na nuvem..."):
-            from bitsignal.cli import cmd_run_daily
-            import argparse
-            cmd_run_daily(argparse.Namespace(db_path=DB_PATH, dry_run=True))
-            df_scores, df_metrics, df_alerts = load_data()
+            try:
+                from bitsignal.cli import cmd_run_daily
+                cmd_run_daily(argparse.Namespace(db_path=DB_PATH, dry_run=True))
+                df_scores, df_metrics, df_alerts = load_data()
+            except Exception as exc:
+                st.error(f"Erro ao inicializar dados ao vivo: {exc}")
     return df_scores, df_metrics, df_alerts
 
 
@@ -50,11 +61,13 @@ with st.sidebar:
     st.header("Controles")
     if st.button("🔄 Atualizar Dados Agora"):
         with st.spinner("Consultando APIs on-chain e de mercado..."):
-            from bitsignal.cli import cmd_run_daily
-            import argparse
-            cmd_run_daily(argparse.Namespace(db_path=DB_PATH, dry_run=True))
-            st.success("Dados atualizados com sucesso!")
-            st.rerun()
+            try:
+                from bitsignal.cli import cmd_run_daily
+                cmd_run_daily(argparse.Namespace(db_path=DB_PATH, dry_run=True))
+                st.success("Dados atualizados com sucesso!")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Erro ao atualizar dados: {exc}")
 
 df_scores, df_metrics, df_alerts = ensure_data_available()
 
