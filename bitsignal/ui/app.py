@@ -9,8 +9,18 @@ import sys
 
 # Ensure repository root is in sys.path BEFORE any bitsignal imports (needed for Streamlit Cloud deployment)
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+root_str = str(ROOT_DIR)
+while root_str in sys.path:
+    sys.path.remove(root_str)
+sys.path.insert(0, root_str)
+
+# Purge any stale bitsignal modules cached from site-packages (Streamlit Cloud container persistence)
+for mod_name in list(sys.modules.keys()):
+    if mod_name == "bitsignal" or mod_name.startswith("bitsignal."):
+        mod_obj = sys.modules.get(mod_name)
+        mod_file = getattr(mod_obj, "__file__", None)
+        if mod_file and not mod_file.startswith(root_str):
+            del sys.modules[mod_name]
 
 import pandas as pd  # noqa: E402
 import plotly.graph_objects as go  # noqa: E402

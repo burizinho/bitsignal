@@ -8,3 +8,4 @@ pyyaml>=6.0.1
 yfinance>=0.2.30
 streamlit>=1.30.0
 plotly>=5.18.0
+-e .
