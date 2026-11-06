@@ -91,8 +91,7 @@ with st.sidebar:
     st.header("Controles")
     if df_scores is not None and not df_scores.empty:
         last_updated = df_scores.iloc[-1].get("created_at", "N/A")
-        st.caption(f"🕒 **Última atualização:**
-`{last_updated} UTC`")
+        st.caption(f"🕒 **Última atualização:**\n`{last_updated} UTC`")
         st.caption("🔄 *Auto-refresh a cada 1 hora ao abrir.*")
     if st.button("🔄 Atualizar Dados Agora"):
         with st.spinner("Consultando APIs on-chain e de mercado..."):
