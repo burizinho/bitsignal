@@ -39,19 +39,49 @@ def load_data():
         conn.close()
 
 
-def ensure_data_available():
-    """Ensure data is loaded; compute immediately if running fresh on Streamlit Cloud."""
-    df_scores, df_metrics, df_alerts = load_data()
+from datetime import datetime, timezone
+
+AUTO_REFRESH_SECONDS = int(os.getenv("AUTO_REFRESH_SECONDS", 3600))  # 1 hour default
+
+
+def is_data_stale(df_scores) -> bool:
+    """Return True if no data exists or the newest score is older than AUTO_REFRESH_SECONDS (1 hour)."""
     if df_scores is None or df_scores.empty:
-        with st.spinner("Inicializando dados de mercado ao vivo na nuvem..."):
+        return True
+    try:
+        latest = df_scores.iloc[-1]
+        ts_str = latest.get("created_at")
+        if not ts_str or pd.isna(ts_str):
+            return True
+        ts = pd.to_datetime(ts_str, utc=True)
+        now = datetime.now(timezone.utc)
+        return (now - ts).total_seconds() >= AUTO_REFRESH_SECONDS
+    except Exception:
+        return False
+
+
+def ensure_data_available():
+    """Ensure data is loaded; automatically updates if data is missing or older than 1 hour."""
+    df_scores, df_metrics, df_alerts = load_data()
+    if is_data_stale(df_scores):
+        is_empty = df_scores is None or df_scores.empty
+        msg = "Inicializando dados de mercado ao vivo..." if is_empty else "Atualizando indicadores de mercado (dados com mais de 1h)..."
+        with st.spinner(msg):
             try:
                 from bitsignal.cli import cmd_run_daily
                 cmd_run_daily(argparse.Namespace(db_path=DB_PATH, dry_run=True))
-                df_scores, df_metrics, df_alerts = load_data()
+                fresh_scores, fresh_metrics, fresh_alerts = load_data()
+                if fresh_scores is not None and not fresh_scores.empty:
+                    df_scores, df_metrics, df_alerts = fresh_scores, fresh_metrics, fresh_alerts
             except Exception as exc:
-                st.error(f"Erro ao inicializar dados ao vivo: {exc}")
+                if is_empty:
+                    st.error(f"Erro ao inicializar dados na nuvem: {exc}")
+                else:
+                    st.warning(f"Não foi possível buscar os dados mais recentes agora ({exc}). Exibindo último registro em cache.")
     return df_scores, df_metrics, df_alerts
 
+
+df_scores, df_metrics, df_alerts = ensure_data_available()
 
 st.title("⚡ BitSignal: Bitcoin Macro Cycle Sentinel")
 st.caption("Autonomous Quantitative Macro Cycle & Cold Storage Divestment Monitor")
@@ -59,6 +89,11 @@ st.caption("Autonomous Quantitative Macro Cycle & Cold Storage Divestment Monito
 # Sidebar controls
 with st.sidebar:
     st.header("Controles")
+    if df_scores is not None and not df_scores.empty:
+        last_updated = df_scores.iloc[-1].get("created_at", "N/A")
+        st.caption(f"🕒 **Última atualização:**
+`{last_updated} UTC`")
+        st.caption("🔄 *Auto-refresh a cada 1 hora ao abrir.*")
     if st.button("🔄 Atualizar Dados Agora"):
         with st.spinner("Consultando APIs on-chain e de mercado..."):
             try:
@@ -68,8 +103,6 @@ with st.sidebar:
                 st.rerun()
             except Exception as exc:
                 st.error(f"Erro ao atualizar dados: {exc}")
-
-df_scores, df_metrics, df_alerts = ensure_data_available()
 
 if df_scores is None or df_scores.empty:
     st.warning("No data found in database. Please run `bitsignal run-daily` or `bitsignal db-init` first.")
