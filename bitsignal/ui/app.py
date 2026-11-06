@@ -34,6 +34,12 @@ from bitsignal.storage.db import (  # noqa: E402
 )
 from bitsignal.strategy.models import PortfolioTransaction, StageType, TransactionType  # noqa: E402
 from bitsignal.strategy.tax_br import compute_darf_for_month, get_monthly_accumulated_alienation  # noqa: E402
+from bitsignal.ui.cycle_gauge import (  # noqa: E402
+    get_all_stages_table,
+    get_cycle_stage_info,
+    render_cycle_regime_gauge,
+    render_operational_intensity_gauge,
+)
 
 DEFAULT_DB_PATH = str(ROOT_DIR / "data" / "bitsignal.db")
 DB_PATH = os.getenv("DATABASE_PATH", DEFAULT_DB_PATH)
@@ -129,7 +135,7 @@ if df_scores is None or df_scores.empty:
 latest_score = df_scores.iloc[-1]
 latest_metric = df_metrics.iloc[-1] if df_metrics is not None and not df_metrics.empty else None
 
-tab_macro, tab_strategy = st.tabs(["🌐 Sentinela Macro Global", "🇧🇷 Estratégia Nacional & Fiscal"])
+tab_macro, tab_plan_gauge, tab_strategy = st.tabs(["🌐 Sentinela Macro Global", "🎯 Termômetro de Ciclo (Plano Nacional)", "🇧🇷 Carteira & Execução Fiscal"])
 
 with tab_macro:
     col1, col2, col3, col4 = st.columns(4)
@@ -227,6 +233,137 @@ with tab_macro:
     if df_alerts is not None and not df_alerts.empty:
         st.subheader("Recent Alert Dispatch History")
         st.dataframe(df_alerts[["date", "alert_type", "composite_score", "delivered_telegram", "created_at"]], use_container_width=True)
+
+with tab_plan_gauge:
+    st.header("🎯 Termômetro de Ciclo — Degraus de Entrada e Saída Nacional")
+    st.caption("Estratégia baseada em preço relativo à máxima do ciclo (ATH = US$ 126 mil) com gestão de intensidade percentual e regras fiscais brasileiras.")
+
+    # Configuration Expander
+    with st.expander("⚙️ Parâmetros do Ciclo & Carteira", expanded=False):
+        p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+        cfg_ath_usd = p_col1.number_input("Máxima de Referência (ATH US$)", value=126000.0, step=1000.0, format="%.2f")
+        cfg_reserve_brl = p_col2.number_input("Reserva Total de Compra (R$)", value=100000.0, step=5000.0, format="%.2f")
+        cfg_pos_btc = p_col3.number_input("Posição Base de Saída (BTC)", value=0.50, step=0.05, format="%.4f")
+        cfg_usd_brl = p_col4.number_input("Câmbio USD/BRL Estimado", value=5.80, step=0.05, format="%.2f")
+
+    spot_usd = btc_price if btc_price > 0 else 95000.0
+    spot_brl = spot_usd * cfg_usd_brl
+    stage_info = get_cycle_stage_info(
+        price_usd=spot_usd,
+        cycle_ath_usd=cfg_ath_usd,
+        usd_brl_rate=cfg_usd_brl,
+        total_reserve_brl=cfg_reserve_brl,
+        total_position_btc=cfg_pos_btc,
+    )
+
+    # Top KPI summary cards
+    k_col1, k_col2, k_col3, k_col4 = st.columns(4)
+    k_col1.metric("Preço BTC (Spot USD)", f"${spot_usd:,.2f}", f"R$ {spot_brl:,.2f}")
+    mult_str = f"{stage_info['ratio']:.2f}x"
+    drawdown_str = f"{stage_info['drawdown_pct']:+.1f}%"
+    k_col2.metric("Múltiplo sobre o Topo (ATH)", mult_str, drawdown_str)
+    k_col3.metric("Fase do Ciclo", stage_info["phase"])
+    k_col4.metric("Degrau Vigente", stage_info["stage_id"])
+
+    st.markdown("---")
+
+    # Gauges: Regime on Left, Intensity on Right
+    g_left, g_right = st.columns([1.2, 1])
+
+    with g_left:
+        fig_regime = render_cycle_regime_gauge(current_price_usd=spot_usd, cycle_ath_usd=cfg_ath_usd)
+        st.plotly_chart(fig_regime, use_container_width=True)
+
+    with g_right:
+        fig_intensity = render_operational_intensity_gauge(stage_info)
+        st.plotly_chart(fig_intensity, use_container_width=True)
+
+    # Actionable Operational Callout Box
+    if stage_info["action"] == "COMPRA":
+        st.success(
+            f"### 🟢 RECOMENDAÇÃO OPERACIONAL: {stage_info['stage_name']}\n\n"
+            f"• **Intensidade Sugerida:** `{stage_info['intensity_pct']:.0f}%` ({stage_info['allocation_base']})\n"
+            f"• **Volume a Aportar:** `R$ {stage_info['volume_brl']:,.2f}` (~ `{stage_info['volume_btc']:.8f} BTC`)\n"
+            f"• **Orientação de Execução:** {stage_info['description']}\n"
+            f"• **Engenharia Fiscal:** {stage_info['tax_note']}"
+        )
+    elif stage_info["action"] == "VENDA":
+        st.warning(
+            f"### 🔴 RECOMENDAÇÃO OPERACIONAL: {stage_info['stage_name']}\n\n"
+            f"• **Intensidade Sugerida:** `{stage_info['intensity_pct']:.0f}%` ({stage_info['allocation_base']})\n"
+            f"• **Desinvestimento:** `{stage_info['volume_btc']:.8f} BTC` (~ `R$ {stage_info['volume_brl']:,.2f}`)\n"
+            f"• **Orientação de Execução:** {stage_info['description']}\n"
+            f"• **Engenharia Fiscal:** {stage_info['tax_note']}"
+        )
+    else:
+        st.info(
+            f"### 🟣 SITUAÇÃO ATUAL: {stage_info['stage_name']}\n\n"
+            f"• **Intensidade Sugerida:** `0%` (Sem compras adicionais e sem desinvestimento)\n"
+            f"• **Orientação:** {stage_info['description']}\n"
+            f"• **Estratégia:** Aguardar fechamento semanal dominical (21h BRT). Os stops móveis protegem contra reversões."
+        )
+
+    st.markdown("---")
+
+    # Interactive Scenario Simulator
+    st.subheader("🧪 Simulador Interativo de Cenários de Preço")
+    st.caption("Arraste o controle para simular como a estratégia se comporta em diferentes patamares de cotação.")
+    
+    sim_price = st.slider(
+        "Cotação Simulada do Bitcoin (US$):",
+        min_value=30000.0,
+        max_value=350000.0,
+        value=float(spot_usd),
+        step=1000.0,
+        format="$%.0f",
+    )
+    
+    sim_info = get_cycle_stage_info(
+        price_usd=sim_price,
+        cycle_ath_usd=cfg_ath_usd,
+        usd_brl_rate=cfg_usd_brl,
+        total_reserve_brl=cfg_reserve_brl,
+        total_position_btc=cfg_pos_btc,
+    )
+    
+    sim_col1, sim_col2, sim_col3 = st.columns(3)
+    sim_col1.metric("Degrau no Cenário", sim_info["stage_name"])
+    sim_col2.metric("Intensidade da Operação", f"{sim_info['intensity_pct']:.0f}% ({sim_info['action']})")
+    vol_text = f"R$ {sim_info['volume_brl']:,.2f}" if sim_info["action"] == "COMPRA" else f"{sim_info['volume_btc']:.4f} BTC (R$ {sim_info['volume_brl']:,.2f})"
+    sim_col3.metric("Volume Sugerido", vol_text if sim_info["action"] != "NENHUMA (HODL)" else "0")
+
+    st.markdown("---")
+
+    # Full Stages Table
+    st.subheader("📋 Tabela Estratégica Completa — Faixas, Degraus e Intensidades")
+    df_all_stages = get_all_stages_table(
+        cycle_ath_usd=cfg_ath_usd,
+        usd_brl_rate=cfg_usd_brl,
+        current_price_usd=spot_usd,
+        total_reserve_brl=cfg_reserve_brl,
+        total_position_btc=cfg_pos_btc,
+    )
+    st.dataframe(df_all_stages, use_container_width=True)
+
+    # Trailing stops rules box
+    st.markdown("---")
+    st.subheader("🛡️ Trailing Stops Dominicais (Proteção Dinâmica de Saída)")
+    ts_col1, ts_col2 = st.columns(2)
+    with ts_col1:
+        st.markdown(
+            "**Stop 1 (Fechamento Semanal < 21w EMA):**\n\n"
+            "• **Gatilho:** Fechamento dominical às 21h00 BRT abaixo da Média Móvel Exponencial de 21 semanas.\n"
+            "• **Intensidade:** Venda imediata de **50% do saldo restante**.\n"
+            "• **Objetivo:** Proteger ganhos antes da confirmação de bear market prolongado."
+        )
+    with ts_col2:
+        st.markdown(
+            "**Stop 2 (Fechamento Semanal < 50w SMA):**\n\n"
+            "• **Gatilho:** Fechamento dominical às 21h00 BRT abaixo da Média Móvel Simples de 50 semanas.\n"
+            "• **Intensidade:** Venda imediata de **100% do saldo restante** (exceto os 10% de Moonbag).\n"
+            "• **Objetivo:** Encerrar a fase de saída do ciclo e migrar liquidez para renda fixa (CDI) até a próxima fase de entrada."
+        )
+
 
 with tab_strategy:
     st.header("🇧🇷 Estratégia de Execução Nacional & Engenharia Fiscal")
