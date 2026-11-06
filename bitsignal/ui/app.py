@@ -3,25 +3,27 @@
 import argparse
 from datetime import datetime, timezone
 import os
+from pathlib import Path
 import sqlite3
 import sys
-from pathlib import Path
-import pandas as pd
-import plotly.graph_objects as go
-import streamlit as st
-from bitsignal.storage.db import (
+
+# Ensure repository root is in sys.path BEFORE any bitsignal imports (needed for Streamlit Cloud deployment)
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+import pandas as pd  # noqa: E402
+import plotly.graph_objects as go  # noqa: E402
+import streamlit as st  # noqa: E402
+
+from bitsignal.storage.db import (  # noqa: E402
     get_executed_stages,
     get_portfolio_summary,
     get_portfolio_transactions,
     record_portfolio_transaction,
 )
-from bitsignal.strategy.models import PortfolioTransaction, StageType, TransactionType
-from bitsignal.strategy.tax_br import compute_darf_for_month, get_monthly_accumulated_alienation
-
-# Ensure repository root is in sys.path (needed for Streamlit Cloud deployment)
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+from bitsignal.strategy.models import PortfolioTransaction, StageType, TransactionType  # noqa: E402
+from bitsignal.strategy.tax_br import compute_darf_for_month, get_monthly_accumulated_alienation  # noqa: E402
 
 DEFAULT_DB_PATH = str(ROOT_DIR / "data" / "bitsignal.db")
 DB_PATH = os.getenv("DATABASE_PATH", DEFAULT_DB_PATH)
