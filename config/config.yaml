@@ -1,0 +1,73 @@
+system:
+  name: "BitSignal"
+  version: "0.1.0"
+  database_path: "./data/bitsignal.db"
+  log_level: "INFO"
+
+metrics:
+  mvrv_z:
+    weight: 0.25
+    min_value: 0.15
+    max_value: 5.00
+    direction: "direct"
+  sma200w_ratio:
+    weight: 0.20
+    min_value: 1.00
+    max_value: 3.50
+    direction: "direct"
+  puell_multiple:
+    weight: 0.20
+    min_value: 0.45
+    max_value: 2.20
+    direction: "direct"
+  picycle:
+    weight: 0.15
+    min_ratio: 0.70
+    max_ratio: 1.00
+    direction: "direct"
+  weekly_rsi:
+    weight: 0.10
+    min_value: 32.0
+    max_value: 80.0
+    direction: "direct"
+  hash_ribbon:
+    weight: 0.10
+    scores:
+      NORMAL: 50.0
+      CAPITULATION: 20.0
+      BUY_RECOVERY: 10.0
+
+integrity:
+  fresh_threshold_hours: 36
+  expired_threshold_hours: 48
+  max_missing_weight_tolerance: 0.20
+  imputed_neutral_score: 50.0
+
+alerting:
+  tiers:
+    tier1_top:
+      threshold: 80.0
+      rearm_deadband: 75.0
+      divestment_tranche_pct: 20.0
+      cumulative_exit_pct: 20.0
+    tier2_top:
+      threshold: 85.0
+      rearm_deadband: 82.0
+      divestment_tranche_pct: 10.0
+      cumulative_exit_pct: 30.0
+    tier3_top:
+      threshold: 90.0
+      rearm_deadband: 87.0
+      divestment_tranche_pct: 10.0
+      cumulative_exit_pct: 40.0
+    bottom_capitulation:
+      threshold: 20.0
+      rearm_deadband: 25.0
+      action: "DCA_ACCUMULATION"
+  sovereign_baseline_pct: 60.0
+
+endpoints:
+  binance_klines: "https://api.binance.com/api/v3/klines"
+  mempool_hashrate: "https://mempool.space/api/v1/mining/hashrate/3m"
+  dune_execution: "https://api.dune.com/api/v1/query/{query_id}/execute"
+  github_csv_mirror: "https://raw.githubusercontent.com/datasets/bitcoin-onchain/main/data/mvrv_puell_daily.csv"

@@ -1,0 +1,77 @@
+
+ESPECIFICAÇÃO DE REQUISITOS E FUNCIONALIDADES
+Sistema: Bitcoin Macro Cycle Sentinel (BitSignal)
+Versão: 1.0Data: Novembro de 2026Status: Planejamento e Arquitetura
+1. VISÃO GERAL E OBJETIVO DO SISTEMA
+O Bitcoin Macro Cycle Sentinel é uma aplicação quantitativa voltada ao monitoramento contínuo de métricas on-chain, técnicas e de rede do Bitcoin. Seu objetivo principal é fornecer sinais objetivos e automatizados para execução de estratégias de ciclo macro:
+
+Identificação de Topos Parabólicos: Alertas escalonados para liquidação tática de 30% a 40% da posição de custódia fria.
+Identificação de Fundos / Capitulação: Alertas para acionamento de DCA escalonado de reacumulação em vales históricos de mercado.
+Eliminação de Vieses Emocionais: Tomada de decisão amparada estritamente em um índice quantitativo consolidado (Composite Cycle Score: 0 a 100).
+2. REQUISITOS FUNCIONAIS (RF)
+RF01 - Coleta Automática de Dados de Mercado:
+Extração diária de preços históricos OHLCV do par BTC-USD via APIs gratuitas (ex: Binance API / yfinance).
+Cálculo de médias móveis exponenciais e simples de horizontes longos (SMA 111, SMA 350, SMA 471, EMA 150 e SMA 200 semanas).
+RF02 - Coleta de Métricas On-Chain e de Mineração:
+Consulta automática ou parse de dados abertos para obtenção de:
+MVRV Ratio e MVRV Z-Score (Market Cap vs Realized Cap).
+Puell Multiple (Receita de mineradores vs média de 365 dias).
+Hash Ribbon (Médias de 30 e 60 dias da taxa de hash da rede).
+RSI Semanal de 14 períodos.
+RF03 - Motor de Pontuação Quantitativa (Cycle Score Engine):
+Normalização e consolidação das métricas em um índice único de 0 a 100 pontos.
+Ponderação técnica recomendada:
+MVRV Z-Score: peso de 25%
+Puell Multiple: peso de 20%
+Pi Cycle Top / Bottom: peso de 20%
+Média Móvel de 200 Semanas: peso de 15%
+RSI Semanal (14p): peso de 10%
+Hash Ribbon Status: peso de 10%
+RF04 - Sistema de Disparo de Gatilhos e Alertas:
+Gatilho de Topo (Score >= 80): Envio de notificação urgente recomendando início de desova tática (30% a 40%) via ordens institucionais.
+Gatilho de Fundo (Score <= 20): Envio de notificação recomendando acionamento de tranches de compra (DCA reverso de reacumulação).
+Disparo de mensagens automáticas via Telegram Bot e webhooks para sistemas locais (ex: integração com nó JARVIS / Home Assistant).
+RF05 - Painel Visual de Monitoramento (Dashboard):
+Interface visual contendo:
+Gauge / Termômetro do Macro Cycle Score atual.
+Gráfico histórico interativo do preço com marcação de bandas do Pi Cycle.
+Histórico de alertas disparados e log de decisões recomendadas.
+3. REQUISITOS NÃO-FUNCIONAIS (RNF)
+RNF01 - Autonomia Operacional: O sistema deve executar de forma autônoma (job diário após o fechamento do candle UTC das 00:00), sem necessidade de interação humana manual.
+RNF02 - Custo Zero de Dados: Priorizar o consumo de dados de endpoints públicos, APIs gratuitas (Dune, Mempool.space, Binance, Yahoo Finance) ou leitura direta de nó local (Bitcoin Core).
+RNF03 - Arquitetura Leve e Portável: Backend leve em Python (FastAPI ou script CLI/daemon) compatível com execução local (macOS Apple Silicon / Linux Server) e interface amigável (Streamlit ou PWA React/Tailwind).
+RNF04 - Confiabilidade e Tolerância a Falhas: Implementação de retries automáticos com backoff exponencial caso alguma API externa falhe temporariamente.
+4. MATRIZ DE GATILHOS E SCORE CONSOLIDADO
+Indicador
+Sinal de Fundo (Score -> 0)
+Sinal de Topo (Score -> 100)
+Peso
+MVRV Z-Score
+Z < 0.15 (Subavaliação extrema)
+Z >= 5.0 (Euforia parabólica)
+25%
+Puell Multiple
+<= 0.45 (Capitulação de minerador)
+>= 2.20 (Hiperlucro)
+20%
+Pi Cycle
+Convergência Bottom (EMA 150*0.745 <= SMA 471)
+Cruzamento Top (SMA 111 >= 2x SMA 350)
+20%
+200w SMA
+Preço <= 200w SMA
+Preço >= 3.5x 200w SMA
+15%
+RSI Semanal
+RSI <= 32 (Sobrevenda)
+RSI >= 80 (Sobrecompra)
+10%
+Hash Ribbon
+Fim da capitulação (30d cruza acima de 60d)
+Neutro
+10%
+5. ROTEIRO DE DESENVOLVIMENTO (ROADMAP DE FASES)
+Fase 1 - Script de Coleta e Indicadores Matemáticos (CLI): Estruturação do pipeline de ingestão de dados em Python com Pandas/NumPy e cálculo dos indicadores.
+Fase 2 - Módulo de Alertas Automatizados: Implementação da rotina de agendamento (cron/launchd) e integração da API do Telegram para envio de relatórios diários.
+Fase 3 - Interface de Monitoramento Local (Streamlit / Web): Construção do painel visual com gauge de ciclo e gráficos históricos.
+Fase 4 - Integração Institucional e Nó Local (Opcional): Conexão direta com RPC do Bitcoin Core próprio para auditoria soberana dos dados on-chain.

@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bitsignal"
+version = "0.1.0"
+description = "Autonomous quantitative Bitcoin macro cycle sentinel"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Project Lead" }]
+dependencies = [
+    "pydantic>=2.5.0",
+    "requests>=2.31.0",
+    "pandas>=2.1.0",
+    "numpy>=1.26.0",
+    "tenacity>=8.2.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.1",
+    "yfinance>=0.2.30",
+]
+
+[project.optional-dependencies]
+ui = [
+    "streamlit>=1.30.0",
+    "plotly>=5.18.0",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.5",
+]
+
+[project.scripts]
+bitsignal = "bitsignal.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
