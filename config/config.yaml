@@ -71,3 +71,12 @@ endpoints:
   mempool_hashrate: "https://mempool.space/api/v1/mining/hashrate/3m"
   dune_execution: "https://api.dune.com/api/v1/query/{query_id}/execute"
   github_csv_mirror: "https://raw.githubusercontent.com/datasets/bitcoin-onchain/main/data/mvrv_puell_daily.csv"
+
+
+strategy:
+  strategy_mode: "tax_optimized_cycle"
+  cycle_ath_usd: 126000.0
+  total_reserve_brl: 100000.0
+  bank_night_limit_brl: 5000.0
+  default_exchange: "Bipa"
+  moonbag_pct: 0.20

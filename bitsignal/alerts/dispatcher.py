@@ -5,6 +5,7 @@ from typing import Optional
 import requests
 from bitsignal.models import AlertType, DailyCompositeResult, HysteresisState, SystemStatus
 from bitsignal.storage.db import record_alert_dispatch
+from bitsignal.strategy.models import StrategyRunbook, TaxStatus, TransactionType
 
 logger = logging.getLogger(__name__)
 
@@ -161,3 +162,75 @@ def process_and_dispatch_alerts(
         return alert_type
 
     return None
+
+
+
+def format_strategy_runbook_message(runbook: StrategyRunbook, current_cmp_brl: float = 0.0) -> str:
+    """Format an actionable strategy runbook Telegram message."""
+    action_desc = "VENDA" if runbook.action_type == TransactionType.SELL else "COMPRA"
+    stage_header = f"{action_desc} {runbook.stage.value}"
+
+    inst_lines = []
+    for idx, inst in enumerate(runbook.instructions, 1):
+        inst_lines.append(f"{idx}. {inst}")
+    instructions_text = "\n".join(inst_lines)
+
+    # Tax section formatting
+    if runbook.action_type == TransactionType.BUY:
+        tax_status_label = "COMPRA / ACUMULAÇÃO (ISENTO NA AQUISIÇÃO)"
+        darf_text = "R$ 0,00"
+        tax_notes = "• Operação de compra: não gera apuração de ganho de capital."
+    else:
+        if runbook.tax_plan.status == TaxStatus.EXEMPT:
+            tax_status_label = "100% ISENTO (Alienação no mês <= R$ 35.000,00)"
+        elif runbook.tax_plan.status == TaxStatus.SPLIT_PENDING:
+            tax_status_label = "SPLIT INTERMENSAL PROGRAMADO (ISENTO)"
+        else:
+            tax_status_label = "TRIBUTÁVEL (Alienação no mês > R$ 35.000,00)"
+        darf_text = f"R$ {runbook.tax_plan.darf_amount:,.2f}"
+        tax_notes = f"• Ganho de Capital Estimado: `R$ {runbook.tax_plan.gross_gain_brl:,.2f}`"
+        if runbook.tax_plan.action == "SPLIT_MONTH_END" and runbook.tax_plan.part2_next_month_brl:
+            tax_notes += f"\n• *Split Intermensal:* Parcela 2 (`R$ {runbook.tax_plan.part2_next_month_brl:,.2f}`) agendada para o 1º dia útil do mês seguinte às 09h00 BRT."
+
+    return (
+        f"🚨 *BITSIGNAL - ALERTA DE EXECUÇÃO ESTRATÉGICA* 🚨\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 *Gatilho Acionado:* `{stage_header}`\n"
+        f"📅 *Data/Hora:* `{runbook.date}`\n"
+        f"💵 *Cotação BTC/BRL:* `R$ {runbook.price_brl:,.2f}` | *USD Spot:* `US$ {runbook.price_usd:,.0f}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📋 *RUNBOOK DE EXECUÇÃO:*\n"
+        f"{instructions_text}\n\n"
+        f"⚖️ *ENGENHARIA FISCAL (RFB):*\n"
+        f"• Status: *{tax_status_label}*\n"
+        f"• Custo Médio Ponderado: `R$ {current_cmp_brl:,.2f}/BTC`\n"
+        f"{tax_notes}\n"
+        f"• Imposto a recolher (DARF): `{darf_text}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    )
+
+
+def send_strategy_runbook(
+    runbook: StrategyRunbook,
+    bot_token: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    current_cmp_brl: float = 0.0,
+    db_path: str = "./data/bitsignal.db",
+    dry_run: bool = False,
+) -> bool:
+    """Format, dispatch, and persist a strategic execution runbook to Telegram."""
+    message = format_strategy_runbook_message(runbook, current_cmp_brl=current_cmp_brl)
+    delivered = False
+    if not dry_run:
+        delivered = dispatch_telegram_alert(bot_token, chat_id, message)
+        record_alert_dispatch(
+            date=runbook.date,
+            alert_type=f"STRATEGY_{runbook.stage.value}",
+            composite_score=None,
+            payload=message,
+            delivered_telegram=delivered,
+            db_path=db_path,
+        )
+    else:
+        logger.info("[DRY RUN] Strategy runbook generated:\n%s", message)
+    return delivered

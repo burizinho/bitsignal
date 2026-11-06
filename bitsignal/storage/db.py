@@ -5,6 +5,7 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 from bitsignal.models import DailyCompositeResult, DailyMetrics, HysteresisState
+from bitsignal.strategy.models import PortfolioSummary, PortfolioTransaction
 
 
 SCHEMA_SQL = """
@@ -52,6 +53,42 @@ CREATE TABLE IF NOT EXISTS alert_dispatches (
     delivered_telegram BOOLEAN NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS portfolio_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    tx_type TEXT CHECK(tx_type IN ('BUY', 'SELL')) NOT NULL,
+    stage TEXT NOT NULL,
+    amount_btc REAL NOT NULL,
+    price_brl REAL NOT NULL,
+    price_usd REAL NOT NULL,
+    ptax_rate REAL,
+    fee_brl REAL DEFAULT 0.0,
+    exchange TEXT NOT NULL,
+    tx_hash TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE VIEW IF NOT EXISTS v_portfolio_summary AS
+SELECT 
+    COALESCE(SUM(CASE WHEN tx_type = 'BUY' THEN amount_btc ELSE -amount_btc END), 0.0) AS current_btc_balance,
+    COALESCE(
+        SUM(CASE WHEN tx_type = 'BUY' THEN (amount_btc * price_brl + fee_brl) ELSE 0.0 END) /
+        NULLIF(SUM(CASE WHEN tx_type = 'BUY' THEN amount_btc ELSE 0.0 END), 0),
+        0.0
+    ) AS current_cmp_brl
+FROM portfolio_transactions;
+
+CREATE VIEW IF NOT EXISTS v_tax_monthly_summary AS
+SELECT 
+    strftime('%Y-%m', date) AS month_year,
+    SUM(amount_btc * price_brl) AS total_alienated_brl,
+    SUM(fee_brl) AS total_fees_brl,
+    CASE WHEN SUM(amount_btc * price_brl) <= 35000.0 THEN 1 ELSE 0 END AS is_exempt
+FROM portfolio_transactions
+WHERE tx_type = 'SELL'
+GROUP BY strftime('%Y-%m', date);
 """
 
 
@@ -201,3 +238,112 @@ def get_historical_scores(db_path: str = "./data/bitsignal.db", limit: int = 500
     with get_connection(db_path) as conn:
         rows = conn.execute(query, (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+
+def record_portfolio_transaction(
+    tx: PortfolioTransaction,
+    db_path: str = "./data/bitsignal.db",
+) -> int:
+    """Record a portfolio transaction in SQLite and return the new row ID."""
+    query = """
+    INSERT INTO portfolio_transactions (
+        date, tx_type, stage, amount_btc, price_brl, price_usd,
+        ptax_rate, fee_brl, exchange, tx_hash, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    """
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(
+            query,
+            (
+                tx.date,
+                tx.tx_type.value if hasattr(tx.tx_type, "value") else str(tx.tx_type),
+                tx.stage.value if hasattr(tx.stage, "value") else str(tx.stage),
+                float(tx.amount_btc),
+                float(tx.price_brl),
+                float(tx.price_usd),
+                float(tx.ptax_rate) if tx.ptax_rate is not None else None,
+                float(tx.fee_brl),
+                str(tx.exchange),
+                tx.tx_hash,
+                tx.notes,
+            ),
+        )
+        return cursor.lastrowid
+
+
+def get_portfolio_summary(db_path: str = "./data/bitsignal.db") -> PortfolioSummary:
+    """Calculate current portfolio balance and weighted average acquisition cost (CMP)."""
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT tx_type, amount_btc, price_brl, fee_brl FROM portfolio_transactions ORDER BY date ASC, id ASC;"
+        ).fetchall()
+
+    current_btc = 0.0
+    total_cost_brl = 0.0
+    total_invested_brl = 0.0
+    total_withdrawn_brl = 0.0
+    total_fees_brl = 0.0
+
+    for r in rows:
+        amount = float(r["amount_btc"])
+        price = float(r["price_brl"])
+        fee = float(r["fee_brl"] or 0.0)
+        total_fees_brl += fee
+
+        if r["tx_type"] == "BUY":
+            total_invested_brl += (amount * price) + fee
+            total_cost_brl += (amount * price) + fee
+            current_btc += amount
+        elif r["tx_type"] == "SELL":
+            total_withdrawn_brl += (amount * price) - fee
+            if current_btc > 0:
+                cost_ratio = min(1.0, amount / current_btc)
+                total_cost_brl -= total_cost_brl * cost_ratio
+                current_btc -= amount
+            else:
+                current_btc -= amount
+
+    cmp_brl = (total_cost_brl / current_btc) if current_btc > 0 else 0.0
+    return PortfolioSummary(
+        current_btc_balance=max(0.0, current_btc),
+        current_cmp_brl=max(0.0, cmp_brl),
+        total_invested_brl=total_invested_brl,
+        total_withdrawn_brl=total_withdrawn_brl,
+        total_fees_brl=total_fees_brl,
+    )
+
+
+def get_portfolio_transactions(
+    db_path: str = "./data/bitsignal.db",
+    limit: int = 1000,
+) -> List[PortfolioTransaction]:
+    """Retrieve historical portfolio transactions."""
+    query = "SELECT * FROM portfolio_transactions ORDER BY date DESC, id DESC LIMIT ?;"
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, (limit,)).fetchall()
+        return [PortfolioTransaction(**dict(r)) for r in rows]
+
+
+def get_monthly_tax_summary(
+    month_year: Optional[str] = None,
+    db_path: str = "./data/bitsignal.db",
+) -> List[Dict[str, Any]]:
+    """Retrieve monthly alienation summaries for RFB tax audit."""
+    if month_year:
+        query = "SELECT * FROM v_tax_monthly_summary WHERE month_year = ?;"
+        params = (month_year,)
+    else:
+        query = "SELECT * FROM v_tax_monthly_summary ORDER BY month_year DESC;"
+        params = ()
+
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_executed_stages(db_path: str = "./data/bitsignal.db") -> List[str]:
+    """Retrieve the set of unique strategy stages already executed."""
+    query = "SELECT DISTINCT stage FROM portfolio_transactions;"
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query).fetchall()
+        return [str(r["stage"]) for r in rows]

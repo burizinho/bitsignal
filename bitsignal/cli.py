@@ -9,7 +9,7 @@ import pandas as pd
 import yaml
 from dotenv import load_dotenv
 
-from bitsignal.alerts.dispatcher import process_and_dispatch_alerts
+from bitsignal.alerts.dispatcher import process_and_dispatch_alerts, send_strategy_runbook
 from bitsignal.backtest.engine import run_backtest
 from bitsignal.engine.indicators import (
     calculate_200w_sma_ratio,
@@ -28,11 +28,24 @@ from bitsignal.ingestion import (
 from bitsignal.integrity import evaluate_system_integrity
 from bitsignal.models import DailyMetrics
 from bitsignal.storage.db import (
+    get_executed_stages,
     get_latest_hysteresis_state,
+    get_portfolio_summary,
     init_db,
+    record_portfolio_transaction,
     upsert_daily_metrics,
     upsert_daily_score,
 )
+from bitsignal.strategy.models import (
+    PortfolioTransaction,
+    StageType,
+    TransactionType,
+)
+from bitsignal.strategy.tax_br import (
+    compute_darf_for_month,
+    get_monthly_accumulated_alienation,
+)
+from bitsignal.strategy.weekly_evaluator import evaluate_weekly_strategy
 
 load_dotenv()
 
@@ -177,6 +190,37 @@ def cmd_run_daily(args):
     else:
         print("   [OK] No alert trigger; state stable within neutral or deadband.")
 
+    # 6. Weekly Execution Strategy Audit (Sundays 21:00 BRT / Mondays 00:00 UTC or 1st of month)
+    now_utc = datetime.now(timezone.utc)
+    config = load_config()
+    if now_utc.weekday() == 0 or now_utc.day == 1:
+        print("6. Auditing weekly national execution strategy (Domingos 21h BRT / Split)...")
+        summary = get_portfolio_summary(db_path)
+        runbook = evaluate_weekly_strategy(
+            db_path=db_path,
+            config=config,
+            current_time=now_utc,
+            weekly_closes=weekly_closes,
+            spot_price_usd=latest_close,
+            mvrv_z=onchain_snapshot.mvrv_z,
+        )
+        if runbook:
+            print(f"   [STRATEGY TRIGGER] Stage: {runbook.stage.value} ({runbook.action_type.value})")
+            print(f"   Order Collar Price: R$ {runbook.collar_price_brl:,.2f} | Amount: {runbook.amount_btc:.8f} BTC (R$ {runbook.amount_brl:,.2f})")
+            print(f"   Tax Status: {runbook.tax_plan.status.value} (DARF: R$ {runbook.tax_plan.darf_amount:,.2f})")
+            if not dry_run:
+                sent = send_strategy_runbook(
+                    runbook=runbook,
+                    bot_token=bot_token,
+                    chat_id=chat_id,
+                    current_cmp_brl=summary.current_cmp_brl,
+                    db_path=db_path,
+                    dry_run=False,
+                )
+                print(f"   [STRATEGY PUSH] Runbook dispatched to Telegram: {sent}")
+        else:
+            print("   [OK] Weekly strategy evaluated: no execution threshold triggered.")
+
     print("=" * 60)
     print("  Daily run complete.")
     print("=" * 60)
@@ -207,6 +251,134 @@ def cmd_ui(args):
     subprocess.run([sys.executable, "-m", "streamlit", "run", app_path])
 
 
+def cmd_strategy_status(args):
+    """Display current portfolio balance, CMP, and monthly tax alienation status."""
+    db_path = args.db_path or os.getenv("DATABASE_PATH", "./data/bitsignal.db")
+    init_db(db_path)
+
+    summary = get_portfolio_summary(db_path)
+    stages = get_executed_stages(db_path)
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m")
+    monthly_alienation = get_monthly_accumulated_alienation(month_year=now_str, db_path=db_path)
+    exemption_remaining = max(0.0, 35000.0 - monthly_alienation)
+
+    print("=" * 65)
+    print("  CARTEIRA ESTRATÉGICA BITCOIN — STATUS OPERACIONAL & FISCAL")
+    print("=" * 65)
+    print(f"  Saldo Atual em Custódia:    {summary.current_btc_balance:.8f} BTC")
+    print(f"  Custo Médio Ponderado (CMP): R$ {summary.current_cmp_brl:,.2f} / BTC")
+    print(f"  Total Aportado Histórico:   R$ {summary.total_invested_brl:,.2f}")
+    print(f"  Total Retirado Histórico:   R$ {summary.total_withdrawn_brl:,.2f}")
+    print(f"  Total Taxas Pagas:          R$ {summary.total_fees_brl:,.2f}")
+    print(f"  Degraus Já Executados:      {', '.join(stages) if stages else 'Nenhum'}")
+    print("-" * 65)
+    print(f"  Alienação no Mês Civil ({now_str}): R$ {monthly_alienation:,.2f}")
+    print("  Teto de Isenção RFB:                 R$ 35,000.00")
+    print(f"  Margem Isenta Restante:              R$ {exemption_remaining:,.2f}")
+    print(f"  Enquadramento Tributário:            {'100% ISENTO' if monthly_alienation <= 35000.0 else 'TRIBUTÁVEL (15% GCAP)'}")
+    print("=" * 65)
+
+
+def cmd_strategy_record_tx(args):
+    """Record a manual execution in portfolio_transactions ledger."""
+    db_path = args.db_path or os.getenv("DATABASE_PATH", "./data/bitsignal.db")
+    init_db(db_path)
+
+    tx_type = TransactionType(args.type.upper())
+    stage = StageType(args.stage.upper())
+    date_str = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    price_usd = args.price_usd
+    if price_usd is None:
+        price_usd = round(args.price_brl / 5.80, 2)
+
+    tx = PortfolioTransaction(
+        date=date_str,
+        tx_type=tx_type,
+        stage=stage,
+        amount_btc=args.btc,
+        price_brl=args.price_brl,
+        price_usd=price_usd,
+        fee_brl=args.fee_brl,
+        exchange=args.exchange,
+        tx_hash=args.tx_hash,
+        notes=args.notes,
+    )
+
+    tx_id = record_portfolio_transaction(tx, db_path=db_path)
+    summary = get_portfolio_summary(db_path)
+
+    print(f"[OK] Transação registrada com sucesso (ID: {tx_id})")
+    print(f"     Tipo: {tx_type.value} | Degrau: {stage.value} | Qtd: {args.btc:.8f} BTC | Preço: R$ {args.price_brl:,.2f}")
+    print(f"     Novo Saldo: {summary.current_btc_balance:.8f} BTC | Novo CMP: R$ {summary.current_cmp_brl:,.2f} / BTC")
+
+
+def cmd_strategy_eval(args):
+    """Evaluate strategy triggers right now."""
+    db_path = args.db_path or os.getenv("DATABASE_PATH", "./data/bitsignal.db")
+    init_db(db_path)
+    config = load_config()
+
+    print("Avaliando gatilhos de estratégia e trailing stops...")
+    summary = get_portfolio_summary(db_path)
+    runbook = evaluate_weekly_strategy(
+        db_path=db_path,
+        config=config,
+        spot_price_usd=args.spot_usd,
+        spot_price_brl=args.spot_brl,
+    )
+
+    if runbook:
+        print("=" * 65)
+        print(f"  [GATILHO ACIONADO]: {runbook.action_type.value} {runbook.stage.value}")
+        print(f"  Cotação BTC/BRL: R$ {runbook.price_brl:,.2f} | USD: ${runbook.price_usd:,.2f}")
+        print(f"  Ordem Limitada:  R$ {runbook.collar_price_brl:,.2f}")
+        print(f"  Volume:          {runbook.amount_btc:.8f} BTC (R$ {runbook.amount_brl:,.2f})")
+        print(f"  Status Fiscal:   {runbook.tax_plan.status.value}")
+        print(f"  DARF Estimada:   R$ {runbook.tax_plan.darf_amount:,.2f}")
+        print("  Instruções de Execução:")
+        for idx, inst in enumerate(runbook.instructions, 1):
+            print(f"    {idx}. {inst}")
+        print("=" * 65)
+
+        if not args.dry_run:
+            bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            chat_id = os.getenv("TELEGRAM_CHAT_ID")
+            sent = send_strategy_runbook(
+                runbook=runbook,
+                bot_token=bot_token,
+                chat_id=chat_id,
+                current_cmp_brl=summary.current_cmp_brl,
+                db_path=db_path,
+                dry_run=False,
+            )
+            print(f"  Alerta despachado no Telegram: {sent}")
+    else:
+        print("[OK] Condições normais: nenhum gatilho de compra, venda ou trailing stop acionado.")
+
+
+def cmd_strategy_tax_report(args):
+    """Compute and display monthly DARF tax report."""
+    db_path = args.db_path or os.getenv("DATABASE_PATH", "./data/bitsignal.db")
+    init_db(db_path)
+    month = args.month or datetime.now(timezone.utc).strftime("%Y-%m")
+
+    report = compute_darf_for_month(month_year=month, db_path=db_path)
+
+    print("=" * 65)
+    print(f"  RELATÓRIO FISCAL RFB (IN 1.888 / GCAP) — {month}")
+    print("=" * 65)
+    print(f"  Total de Alienações no Mês: R$ {report['total_alienated_brl']:,.2f}")
+    print(f"  Ganho de Capital Líquido:   R$ {report['total_gain_brl']:,.2f}")
+    status_str = "ISENTO (0% de imposto)" if report['is_exempt'] else "TRIBUTÁVEL (15% GCAP)"
+    print(f"  Status de Isenção:          {status_str}")
+    print(f"  Imposto Devido (DARF 15%):  R$ {report['darf_due_brl']:,.2f}")
+    if not report['is_exempt']:
+        print("  Código da Receita:          4600 (Ganhos de Capital na Alienação de Criptoativos)")
+        print("  Data Limite de Pagamento:   Último dia útil do mês seguinte")
+    print("=" * 65)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="bitsignal",
@@ -231,6 +403,32 @@ def main():
     # ui
     subparsers.add_parser("ui", help="Launch Streamlit dashboard")
 
+    # strategy-status
+    subparsers.add_parser("strategy-status", help="Show current portfolio balance, CMP, and tax status")
+
+    # strategy-record-tx
+    p_rec = subparsers.add_parser("strategy-record-tx", help="Record a portfolio buy/sell transaction")
+    p_rec.add_argument("--type", required=True, choices=["BUY", "SELL", "buy", "sell"], help="Transaction type (BUY or SELL)")
+    p_rec.add_argument("--stage", required=True, help="Strategy stage (e.g. C0, C1, V1, STOP_1, SPLIT_PART_2)")
+    p_rec.add_argument("--btc", required=True, type=float, help="Amount in BTC")
+    p_rec.add_argument("--price-brl", required=True, type=float, help="Execution price in BRL")
+    p_rec.add_argument("--price-usd", type=float, default=None, help="Spot price in USD at execution")
+    p_rec.add_argument("--fee-brl", type=float, default=0.0, help="Brokerage and network fee in BRL")
+    p_rec.add_argument("--exchange", default="Bipa", help="National exchange name (default: Bipa)")
+    p_rec.add_argument("--tx-hash", default=None, help="On-chain transaction hash")
+    p_rec.add_argument("--notes", default=None, help="Operational execution notes")
+    p_rec.add_argument("--date", default=None, help="Execution date ISO format")
+
+    # strategy-eval
+    p_eval = subparsers.add_parser("strategy-eval", help="Evaluate weekly strategy and trailing stops")
+    p_eval.add_argument("--spot-usd", type=float, default=None, help="Override spot price USD")
+    p_eval.add_argument("--spot-brl", type=float, default=None, help="Override spot price BRL")
+    p_eval.add_argument("--dry-run", action="store_true", help="Do not dispatch alert to Telegram")
+
+    # strategy-tax-report
+    p_tax = subparsers.add_parser("strategy-tax-report", help="Generate monthly RFB DARF tax report")
+    p_tax.add_argument("--month", default=None, help="Month in format YYYY-MM (default: current month)")
+
     args = parser.parse_args()
 
     if args.command == "db-init":
@@ -241,6 +439,14 @@ def main():
         cmd_backtest(args)
     elif args.command == "ui":
         cmd_ui(args)
+    elif args.command == "strategy-status":
+        cmd_strategy_status(args)
+    elif args.command == "strategy-record-tx":
+        cmd_strategy_record_tx(args)
+    elif args.command == "strategy-eval":
+        cmd_strategy_eval(args)
+    elif args.command == "strategy-tax-report":
+        cmd_strategy_tax_report(args)
 
 
 if __name__ == "__main__":
