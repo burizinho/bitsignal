@@ -257,7 +257,10 @@ def render_backtest(cfg):
             width="stretch",
         )
     rep = cached_backtest(current, window, cfg, frozen if window == "development" else None)
-    st.caption(BACKTEST_HEADER)
+    if window == "development":
+        st.caption(BACKTEST_HEADER)
+    else:
+        st.caption(f"Janela de calibração: do início da carteira até {_d(cfg.backtest.calibration_end)}.")
     frames = to_frames(rep)
     st.plotly_chart(charts.equity_chart(frames), width="stretch")
     st.dataframe(frames["diagnostics"], hide_index=True, width="stretch")
