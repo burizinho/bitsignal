@@ -28,11 +28,12 @@ def with_cmp(**cmp):
 # --- config ------------------------------------------------------------------------------
 
 
-def test_comparison_block_stays_out_of_the_frozen_hash():
+def test_comparison_block_enters_the_hash_only_when_not_default():
     v1 = load_config("config/config_v1.yaml")
     frozen = load_frozen_params(v1.backtest.frozen_params)
-    assert model_hash(v1) == frozen.model_hash
-    assert model_hash(apply_overrides(v1, {"comparison": {"buy_sizing": "cash", "floor_base": "initial"}})) == frozen.model_hash
+    assert model_hash(v1) == frozen.model_hash  # default comparison block: v1 hash unchanged
+    changed = apply_overrides(v1, {"comparison": {"buy_sizing": "cash", "floor_base": "initial"}})
+    assert model_hash(changed) != frozen.model_hash  # a comparison model has its own identity
 
 
 @pytest.mark.parametrize("cmp", [

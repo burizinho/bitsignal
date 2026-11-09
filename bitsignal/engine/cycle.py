@@ -163,6 +163,18 @@ def _fmt_pct(x: float) -> str:
     return f"{x * 100:.0f}%"
 
 
+def _minimal_verdict(row, last_week, ds: DataStatus) -> Verdict:
+    """Verdict of the ``minimal`` comparison model (no score, no detector)."""
+    phase = Phase(row["phase"])
+    cycle_start = pd.Timestamp(row["cycle_start_date"]).date()
+    ratio = row.get("price_to_sma200w")
+    ratio_txt = "—" if ratio is None or pd.isna(ratio) else f"{ratio:.2f}"
+    buy = float(row["buy_pct"]) if phase == Phase.ACCUMULATE else None
+    reason = f"minimal: preço/SMA200w {ratio_txt}; ciclo iniciado em {cycle_start.isoformat()}"
+    return Verdict(week=last_week, data_status=ds, phase=phase, sell_target=float(row["ratchet_sell"]),
+                   cycle_start_date=cycle_start, buy_pct=buy, reason=reason)
+
+
 def latest_verdict(result: ReplayResult, now_utc: datetime, cfg: Config) -> Verdict:
     ds = data_status(result, now_utc, cfg)
     weeks = result.weeks
@@ -171,6 +183,8 @@ def latest_verdict(result: ReplayResult, now_utc: datetime, cfg: Config) -> Verd
         return Verdict(week=last_week, data_status=ds, reason="dados desatualizados: sem veredito nesta carga")
 
     row = weeks.iloc[-1]
+    if cfg.comparison.model == "minimal":
+        return _minimal_verdict(row, last_week, ds)
     phase = Phase(row["phase"])
     status = ScoreStatus(row["status"])
     cycle_start = pd.Timestamp(row["cycle_start_date"]).date()

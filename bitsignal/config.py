@@ -344,6 +344,10 @@ def model_payload(cfg: Config) -> Dict[str, Any]:
         if payload[block].get(key) == v1_value:
             del payload[block][key]
     payload["backtest"] = {k: dumped["backtest"][k] for k in MODEL_BACKTEST_FIELDS}
+    # Comparison options enter only when they differ from the default, so v1/v2 hashes are unchanged
+    # and a comparison model (e.g. the forward ``minimal`` arm) gets its own identity.
+    if dumped["comparison"] != ComparisonConfig().model_dump(mode="json"):
+        payload["comparison"] = dumped["comparison"]
     return payload
 
 

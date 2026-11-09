@@ -6,6 +6,7 @@ Window: from the first Sunday on or after the v2 freeze date until the first of
 or the last data available (window still open).
 A new portfolio starts at the window start (1 BTC + 0.5 BTC in USD), inheriting the model state
 as in Phase 1. Criteria: the three Q1 criteria rebased at the window start, plus v2 >= v1.
+The pre-registered ``minimal`` arm (Phase 3 addendum) is reported next to them, never as a criterion.
 Before the window ends nothing is concluded; this module never writes anything.
 """
 
@@ -41,7 +42,7 @@ def window_end(weeks: pd.DataFrame, events, start: pd.Timestamp, deadline: date 
 
 
 def forward_eval(history: MarketHistory, cfg_v2: Config, cfg_v1: Config, frozen_at: date,
-                 deadline: date = DEADLINE) -> Dict:
+                 deadline: date = DEADLINE, cfg_min: Optional[Config] = None) -> Dict:
     price = history.daily["price"]
     r2 = run_model(history, cfg_v2)
     r1 = run_model(history, cfg_v1)
@@ -63,6 +64,12 @@ def forward_eval(history: MarketHistory, cfg_v2: Config, cfg_v1: Config, frozen_
     eq1 = float(s1.equity["equity_usd"].dropna().iloc[-1])
     crit["values"]["v2_vs_v1"] = eq2 / eq1
     crit["passed"]["v2_vs_v1"] = eq2 >= eq1
+    comparison = {}
+    if cfg_min is not None:  # pre-registered arm: reported, not a criterion
+        rm = run_model(history, cfg_min)
+        sm = simulate(rm, price, cfg_min, start.date(), ratchet_at(rm, start), end)
+        eqm = float(sm.equity["equity_usd"].dropna().iloc[-1])
+        comparison = {"minimal": eqm, "v2_vs_minimal": eq2 / eqm}
     return {
         "status": "closed" if closed is not None else "open",
         "start": start.date(),
@@ -70,6 +77,7 @@ def forward_eval(history: MarketHistory, cfg_v2: Config, cfg_v1: Config, frozen_
         "criteria": crit,
         "equity": {"v2": eq2, "v1": eq1, "bnh": float(bnh.equity["equity_usd"].dropna().iloc[-1]),
                    "uniform": float(uni.equity["equity_usd"].dropna().iloc[-1])},
+        "comparison": comparison,
     }
 
 
@@ -82,6 +90,11 @@ def to_text(res: Dict) -> str:
     state = ("JANELA ENCERRADA" if res["status"] == "closed"
              else "janela em andamento: só exibição, nenhuma conclusão registrada")
     e = res["equity"]
+    extra = []
+    if res.get("comparison"):
+        c = res["comparison"]
+        extra = [f"  Comparação pré-registrada (não é critério): v2 / minimal = {c['v2_vs_minimal']:.3f} "
+                 f"(minimal US$ {c['minimal']:,.0f})"]
     return "\n".join([
         f"Avaliação futura do v2 (Fase 3, E4): {res['start']} → {res['end']} · {state}",
         f"  1. patrimônio / comprar e segurar = {v['equity_vs_bnh']:.3f} (meta ≥ 0,90) → {ok(p['equity_vs_bnh'])}",
@@ -90,4 +103,4 @@ def to_text(res: Dict) -> str:
         f"  4. patrimônio v2 / v1 = {v['v2_vs_v1']:.3f} (meta ≥ 1,00) → {ok(p['v2_vs_v1'])}",
         f"  Patrimônio (USD): v2 {e['v2']:,.0f} · v1 {e['v1']:,.0f} · comprar e segurar {e['bnh']:,.0f} · "
         f"DCA uniforme {e['uniform']:,.0f}",
-    ])
+    ] + extra)

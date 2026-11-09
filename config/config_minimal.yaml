@@ -1,0 +1,93 @@
+# BitSignal — modelo `minimal`, braço de comparação da avaliação futura (pré-registrado em 2026-11-09).
+# Regra: docs/designs/bitcoin_cycle_phase3_reinvestment.md (adendo). Só backtest/registro; o painel rejeita.
+# Mesma carteira e mesmos custos do v1; score, escada e detector não são usados por este modelo.
+# Schema e validação: bitsignal/config.py. Regras: docs/designs/bitcoin_unified_cycle_model.md (§2–§8).
+# Os blocos antigos (system, metrics, integrity, alerting, endpoints, strategy) saíram no S2.
+
+score:
+  inputs:                      # chaves canônicas usadas no código e nos selos
+    mvrv_z:           {weight: 0.25, min: 0.15, max: 5.00}
+    price_to_sma200w: {weight: 0.20, min: 1.00, max: 3.50}
+    puell:            {weight: 0.20, min: 0.45, max: 2.20}
+    picycle:          {weight: 0.15, min: 0.70, max: 1.00}
+    rsi14w:           {weight: 0.10, min: 32.0, max: 80.0}
+    hash_ribbon:      {weight: 0.10}
+  hash_ribbon_points: {NORMAL: 50.0, CAPITULATION: 20.0, BUY_RECOVERY: 10.0}
+  picycle_bottom_factor: 0.745
+  essential: [mvrv_z, puell]
+  max_missing_weight: 0.20
+
+sell_ladder:                   # [score_min mínimo, venda acumulada]
+  - [85.0, 0.05]
+  - [90.0, 0.15]
+  - [93.0, 0.30]
+
+detector:
+  arming_weeks: 52
+  trend_sma_weeks: 30
+  confirm_weeks: 2
+  trigger_max_ratio_to_high52: 0.80
+  n2_sma_weeks: 50
+  n3_max_ratio_to_high52: 0.60
+  levels: [0.10, 0.25, 0.50]
+
+cap:
+  floor: 0.50
+
+cycle:
+  arm_score: 20.0
+  arm_weeks: 2
+  confirm_score: 30.0
+  confirm_weeks: 2
+
+buys:
+  mode: score_dca              # score_dca | uniform (uniform só no benchmark)
+  tiers:                       # [score_max máximo, % da reserva-base por semana]
+    - [10.0, 0.04]
+    - [20.0, 0.02]
+  uniform_weeks: 52
+
+backtest:
+  initial_btc: 1.0
+  reserve_btc_equiv: 0.5
+  start: first_all_valid_week  # ou uma data ISO
+  execution_lag_days: 1
+  fee: 0.003
+  calibration_end: 2018-12-31
+  approval_window_start: 2019-01-01
+  criteria: {equity_vs_bnh: 0.90, dd_improvement_pp: 10.0, equity_vs_uniform: 1.00}
+  sensitivities:
+    reserve_0:       {backtest: {reserve_btc_equiv: 0.0}}
+    reserve_1:       {backtest: {reserve_btc_equiv: 1.0}}
+    lag_2:           {backtest: {execution_lag_days: 2}}
+    late_entry_2019: {backtest: {start: 2019-01-01}}
+  events:
+    - {name: fundo_2015, kind: bottom, window: [2014-12-01, 2015-09-30]}
+    - {name: topo_2017, kind: top, window: [2017-11-01, 2018-01-31]}
+    - {name: fundo_2018, kind: bottom, window: [2018-11-01, 2019-02-28]}
+    - {name: topo_2021_abr, kind: top, window: [2021-03-01, 2021-05-15]}
+    - {name: topo_2021_nov, kind: top, window: [2021-10-01, 2021-12-15]}
+    - {name: fundo_2022, kind: bottom, window: [2022-06-01, 2023-01-31]}
+    - {name: topo_2025, kind: top, window: [2025-09-01, 2025-11-30]}
+  frozen_params: null  # sem congelamento próprio: a identidade fica no model_hash de cada linha do registro
+
+data:
+  csv_path: data/historical/btc_coinmetrics.csv
+  verdict_log_path: data/verdicts/weekly_verdicts_minimal.csv
+  max_staleness_days: 9
+
+ui:
+  cache_ttl_coinmetrics: "6h"  # str repassado ao st.cache_data
+  cache_ttl_spot: "15m"
+  retry_cooldown_s: 30
+
+comparison:
+  model: minimal
+  minimal:                     # valores pré-registrados (§7 da Fase 1)
+    distribute_ratio: 3.5
+    picycle_top_spread: 1.0
+    sell_step: 0.15
+    sell_cap: 0.30
+    buy_first_week: 0.40
+    buy_dd50: 0.30
+    buy_dd70: 0.30

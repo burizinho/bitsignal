@@ -83,7 +83,7 @@ O `requirements.txt` (usado pelo Streamlit Cloud) instala `-e .[ui]`.
 | `bitsignal backtest --window development` | Janela de desenvolvimento (2019+): mostra os critérios gravados ao lado do recálculo. Exige parâmetros congelados com o mesmo `model_hash`. |
 | `bitsignal backtest --variants [--window development]` | Fase 2: o modelo padrão e as variantes de comparação lado a lado. Só diagnóstico sobre dados já vistos; nunca grava nada. |
 | `bitsignal record-verdict [--config …]` | Grava o veredito da última semana fechada no registro semanal do modelo (veja abaixo). |
-| `bitsignal forward-eval` | Avaliação do v2 com dados futuros (Fase 3): v2 contra v1, comprar e segurar e DCA uniforme desde o congelamento do v2. Só exibe. |
+| `bitsignal forward-eval` | Avaliação do v2 com dados futuros (Fase 3): v2 contra v1, comprar e segurar e DCA uniforme desde o congelamento do v2, mais a comparação com o `minimal` (não é critério). Só exibe. |
 | `bitsignal fetch-history` | Baixa o histórico do CoinMetrics e grava um novo CSV congelado. |
 | `bitsignal freeze-params` | Congela os parâmetros num arquivo novo (recusa se os testes técnicos falharem ou se o arquivo existir). |
 
@@ -113,8 +113,9 @@ avaliação; mudar qualquer um deles exige um novo design e um novo congelamento
 A janela 2019+ já foi vista, então nenhuma avaliação feita nela é independente. Para juntar
 evidência que não seja retrospectiva, o workflow `.github/workflows/weekly-verdict.yml` roda toda
 segunda e terça às 12:00 UTC, executa `bitsignal record-verdict` para cada modelo e commita uma
-linha por semana fechada em `data/verdicts/weekly_verdicts.csv` (v1) e
-`data/verdicts/weekly_verdicts_v2.csv` (v2). Um arquivo nunca mistura modelos: o comando recusa
+linha por semana fechada em `data/verdicts/weekly_verdicts.csv` (v1),
+`data/verdicts/weekly_verdicts_v2.csv` (v2) e `data/verdicts/weekly_verdicts_minimal.csv` (o modelo
+`minimal`, braço de comparação pré-registrado em 2026-11-09; colunas de score vazias). Um arquivo nunca mistura modelos: o comando recusa
 gravar se o `model_hash` não for o do arquivo. Na semana de reinício do v2, `buy_pct` vale `all_cash`.
 Colunas:
 

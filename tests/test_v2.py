@@ -129,3 +129,33 @@ def test_forward_eval_offline():
     assert forward_eval(HISTORY, V2, V1, date(2026, 12, 1))["status"] == "no_weeks"
     open_ = forward_eval(HISTORY, V2, V1, date(2026, 6, 1))
     assert open_["status"] == "open" and open_["end"] == date(2026, 11, 8)
+
+
+# --- pre-registered minimal arm (Phase 3 addendum) ---------------------------------------
+
+MIN = load_config("config/config_minimal.yaml")
+
+
+def test_minimal_arm_has_its_own_identity_and_log():
+    assert MIN.comparison.model == "minimal"
+    assert len({model_hash(V1), model_hash(V2), model_hash(MIN)}) == 3
+    assert MIN.data.verdict_log_path == "data/verdicts/weekly_verdicts_minimal.csv"
+    assert MIN.backtest.frozen_params is None
+
+
+def test_minimal_weekly_verdict_and_row():
+    now = datetime(2026, 11, 9, 12, tzinfo=timezone.utc)
+    r = run_model(HISTORY, MIN)
+    v = latest_verdict(r, now, MIN)
+    assert v.phase is not None and v.reason.startswith("minimal:")
+    row = verdict_row(r, v, now)
+    assert row["score"] == "" and row["score_status"] == ""  # the minimal model has no score
+    assert row["model_hash"] == model_hash(MIN)
+
+
+def test_forward_eval_reports_minimal_without_making_it_a_criterion():
+    res = forward_eval(HISTORY, V2, V1, date(2024, 1, 1), deadline=date(2025, 6, 30), cfg_min=MIN)
+    assert set(res["comparison"]) == {"minimal", "v2_vs_minimal"}
+    assert "v2_vs_minimal" not in res["criteria"]["passed"]
+    assert res["comparison"]["v2_vs_minimal"] == pytest.approx(res["equity"]["v2"] / res["comparison"]["minimal"])
+
