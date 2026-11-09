@@ -1,0 +1,83 @@
+approval: null
+csv_sha256: ed34e12de88cf2b44c0188131d7e0644363dbac882f650236ed1bf1eeb885372
+frozen_at: '2026-11-09T19:16:19.192970Z'
+model:
+  backtest:
+    approval_window_start: '2019-01-01'
+    criteria:
+      dd_improvement_pp: 10.0
+      equity_vs_bnh: 0.9
+      equity_vs_uniform: 1.0
+    execution_lag_days: 1
+    fee: 0.003
+    initial_btc: 1.0
+    reserve_btc_equiv: 0.5
+  buys:
+    mode: score_dca
+    tiers:
+    - - 10.0
+      - 0.04
+    - - 20.0
+      - 0.02
+    uniform_weeks: 52
+  cap:
+    floor: 0.5
+  cycle:
+    arm_score: 20.0
+    arm_weeks: 2
+    confirm_score: 30.0
+    confirm_weeks: 2
+  detector:
+    arming_weeks: 52
+    confirm_weeks: 2
+    levels:
+    - 0.1
+    - 0.25
+    - 0.5
+    n2_sma_weeks: 50
+    n3_max_ratio_to_high52: 0.6
+    trend_sma_weeks: 30
+    trigger_max_ratio_to_high52: 0.8
+  score:
+    essential:
+    - mvrv_z
+    - puell
+    hash_ribbon_points:
+      BUY_RECOVERY: 10.0
+      CAPITULATION: 20.0
+      NORMAL: 50.0
+    inputs:
+      hash_ribbon:
+        max: null
+        min: null
+        weight: 0.1
+      mvrv_z:
+        max: 5.0
+        min: 0.15
+        weight: 0.25
+      picycle:
+        max: 1.0
+        min: 0.7
+        weight: 0.15
+      price_to_sma200w:
+        max: 3.5
+        min: 1.0
+        weight: 0.2
+      puell:
+        max: 2.2
+        min: 0.45
+        weight: 0.2
+      rsi14w:
+        max: 80.0
+        min: 32.0
+        weight: 0.1
+    max_missing_weight: 0.2
+    picycle_bottom_factor: 0.745
+  sell_ladder:
+  - - 85.0
+    - 0.05
+  - - 90.0
+    - 0.15
+  - - 93.0
+    - 0.3
+model_hash: 15d1e484a6f4ac7954877964936f890ac4863313734c204c27992f50786080d2
