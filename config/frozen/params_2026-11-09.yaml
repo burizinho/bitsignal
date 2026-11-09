@@ -1,4 +1,14 @@
-approval: null
+approval:
+  passed:
+    dd_improvement_pp: true
+    equity_vs_bnh: false
+    equity_vs_uniform: true
+  run_at: '2026-11-09T19:16:47.255872Z'
+  values:
+    dd_improvement_pp: 31.349139901125582
+    equity_vs_bnh: 0.3249458448285625
+    equity_vs_uniform: 1.0160107737031603
+  window: development
 csv_sha256: ed34e12de88cf2b44c0188131d7e0644363dbac882f650236ed1bf1eeb885372
 frozen_at: '2026-11-09T19:16:19.192970Z'
 model:
