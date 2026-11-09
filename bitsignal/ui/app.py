@@ -247,7 +247,7 @@ def render_export(result, verdict, cfg, now):
                        file_name=f"bitsignal_veredito_{week}.csv", mime="text/csv", key="dl_verdict")
     log = export.read_log(repo_path(cfg.data.verdict_log_path))
     if log:
-        c2.download_button(f"Registro semanal gravado ({len(log)} semanas)", data=export.rows_to_csv(log, brazil),
+        c2.download_button(f"Registro semanal gravado ({len(log)} semana{'s' if len(log) != 1 else ''})", data=export.rows_to_csv(log, brazil),
                            file_name=f"bitsignal_registro_{Path(cfg.data.verdict_log_path).stem}.csv",
                            mime="text/csv", key="dl_log")
     else:
