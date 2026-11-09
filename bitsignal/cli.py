@@ -295,6 +295,7 @@ def cmd_record_verdict(args):
 
 
 V1_CONFIG = "config/config_v1.yaml"
+MINIMAL_CONFIG = "config/config_minimal.yaml"  # pre-registered forward comparison arm
 
 
 def cmd_forward_eval(args):
@@ -306,6 +307,7 @@ def cmd_forward_eval(args):
 
     cfg_v2 = _load_cfg(args)
     cfg_v1 = load_config(V1_CONFIG)
+    cfg_min = load_config(MINIMAL_CONFIG)
     frozen = load_frozen_params(cfg_v2.backtest.frozen_params)
     if frozen is None:
         print("[ERRO] o v2 ainda não foi congelado (backtest.frozen_params vazio).")
@@ -314,7 +316,7 @@ def cmd_forward_eval(args):
         history = load_frozen_history(cfg_v2.data.csv_path)
     else:
         history = from_frame(fetch_coinmetrics(), source="coinmetrics_live")
-    print(to_text(forward_eval(history, cfg_v2, cfg_v1, frozen.frozen_at.date())))
+    print(to_text(forward_eval(history, cfg_v2, cfg_v1, frozen.frozen_at.date(), cfg_min=cfg_min)))
 
 
 def cmd_ui(args):

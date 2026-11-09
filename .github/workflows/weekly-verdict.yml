@@ -1,7 +1,8 @@
 name: Registro semanal do veredito
 
 # Grava o veredito da última semana fechada de cada modelo: v1 em data/verdicts/weekly_verdicts.csv
-# (config/config_v1.yaml) e v2 em data/verdicts/weekly_verdicts_v2.csv (config/config.yaml).
+# (config/config_v1.yaml), v2 em data/verdicts/weekly_verdicts_v2.csv (config/config.yaml) e o braço de
+# comparação minimal em data/verdicts/weekly_verdicts_minimal.csv (config/config_minimal.yaml).
 # Segunda e terça às 12:00 UTC: o CoinMetrics publica o dado de domingo no dia seguinte, e a
 # segunda execução só grava se a primeira não encontrou a semana nova (linhas nunca são reescritas).
 on:
@@ -32,6 +33,8 @@ jobs:
         run: bitsignal record-verdict --config config/config_v1.yaml
       - name: Record verdict (v2)
         run: bitsignal record-verdict
+      - name: Record verdict (minimal, comparison arm)
+        run: bitsignal record-verdict --config config/config_minimal.yaml
       - name: Commit
         run: |
           if [ -z "$(git status --porcelain -- data/verdicts)" ]; then

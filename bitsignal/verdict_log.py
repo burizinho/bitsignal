@@ -56,9 +56,9 @@ def verdict_row(result: ReplayResult, verdict: Verdict, recorded_at: datetime) -
         "phase": verdict.phase.value,
         "sell_target": _num(verdict.sell_target, 4),
         "buy_pct": "all_cash" if verdict.buy_all_cash else _num(verdict.buy_pct, 4),
-        "score": _num(last["score"], 2),
-        "score_min": _num(last["score_min"], 2),
-        "score_max": _num(last["score_max"], 2),
+        "score": _num(last.get("score"), 2),  # empty for the minimal model (no score)
+        "score_min": _num(last.get("score_min"), 2),
+        "score_max": _num(last.get("score_max"), 2),
         "score_status": verdict.score_status.value if verdict.score_status else "",
         "detector_level": str(int(last["level"])),
         "reset_pending": str(bool(last["reset_pending"])).lower(),

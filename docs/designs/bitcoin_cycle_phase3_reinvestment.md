@@ -131,3 +131,23 @@ mostrou que não ajudam); recalibrar qualquer parâmetro do v1; alertas; registr
 *   `--record` é recusado no v2. `forward-eval` só exibe; gravar a conclusão de E4 fica para quando a
     janela fechar (comando a definir nessa data, sem mudar o critério).
 
+## Adendo (2026-11-09): o `minimal` como terceiro braço da avaliação futura
+
+Registrado **antes** de existir qualquer semana depois do congelamento do v2 (o primeiro dado novo é a
+semana de 2026-11-15).
+
+*   **Por quê:** na Fase 2, o `minimal` (0,453 do comprar e segurar em 2019+) superou o v1 (0,325) com
+    regras muito mais simples. Sem registrá-lo agora, não haveria como saber, de forma honesta, se a
+    complexidade do v2 se paga.
+*   **Regra:** a do §7 da Fase 1, com a interpretação de D4 já registrada no design da Fase 2.
+    Parâmetros em `config/config_minimal.yaml` (bloco `comparison.minimal`, valores pré-registrados);
+    nenhum ajuste depois desta data.
+*   **Registro:** uma linha por semana em `data/verdicts/weekly_verdicts_minimal.csv`, pelo mesmo
+    workflow. Colunas de score ficam vazias (o `minimal` não usa score).
+*   **Avaliação:** na mesma janela e com a mesma carteira inicial de E4, `forward-eval` mostra também o
+    patrimônio do `minimal` e a razão v2 / `minimal`.
+*   **Papel:** só comparação. **Não muda** os critérios de E4 nem a decisão sobre o v2. Se no fim da
+    janela o `minimal` superar o v2, isso vira insumo para um design futuro, não uma troca automática.
+*   **Identidade:** o bloco `comparison` passa a entrar no `model_hash` quando difere do padrão, para o
+    `minimal` ter hash próprio (o v1 e o v2 continuam com `15d1e484…` e `dc9ea76f…`).
+
