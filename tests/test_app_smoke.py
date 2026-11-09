@@ -69,6 +69,8 @@ def test_top_line_and_experimental_badge():
     assert "Experimental" in texts(at.warning)  # v2: no recorded evaluation
     assert "Janela de calibração" in texts(at.caption)
     assert "não alteram a posição-base" in texts(at.info)  # ACCUMULATE fixed notice
+    assert "O que mudaria o veredito" in texts(at.markdown)
+    assert "score mínimo ≥ 30 por 2 semanas" in texts(at.markdown)
 
 
 def test_stale_data_shows_no_verdict():

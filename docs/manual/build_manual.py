@@ -306,7 +306,8 @@ story.append(P("5. As abas do painel", h1))
 story.append(table([
     ["Aba", "O que tem"],
     ["Semana", "O medidor do score (0 a 100), o medidor da venda acumulada-alvo (até 50%), o estado do detector "
-     "de reversão e a <b>calculadora</b>."],
+     "de reversão, o bloco <b>“O que mudaria o veredito”</b> (os próximos gatilhos do modelo e a distância de "
+     "hoje até eles) e a <b>calculadora</b>."],
     ["Insumos", "Os seis indicadores da semana, cada um com o valor e se estava disponível. Serve para conferir "
      "de onde veio o score."],
     ["Ciclo e eventos", "O gráfico do preço com as fases coloridas e a lista do que aconteceu no ciclo atual "
