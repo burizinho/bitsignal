@@ -1,4 +1,4 @@
-"""Valuation score (design §4, plan item 21). Replaces normalizer.py in S8."""
+"""Valuation score (design §4, plan item 21)."""
 
 from __future__ import annotations
 

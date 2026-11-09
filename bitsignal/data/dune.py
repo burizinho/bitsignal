@@ -1,7 +1,6 @@
 """Dune: cross-check only (plan item 15, Q7). Never imported by engine/ or backtest/.
 
-Adapted copy of the Dune read in ``bitsignal/ingestion.py:207-224``; the original stays in place
-for the old dashboard until step S8.
+Adapted from the Dune read of the former ``bitsignal/ingestion.py`` (removed in S8).
 """
 
 from __future__ import annotations

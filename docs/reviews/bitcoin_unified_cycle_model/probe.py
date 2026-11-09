@@ -1,3 +1,6 @@
+# Historical review probe (EGM review of the unified cycle model design). Kept for reference only.
+# It imports bitsignal.engine.normalizer and calculate_rsi, both removed in S8, so it no longer runs.
+# The independent oracle used by the tests is sev.py in this folder.
 import sys, requests, pandas as pd, numpy as np
 sys.path.insert(0, r"D:/Projetos Gui/BitSignal")
 from bitsignal.engine.indicators import calculate_rsi

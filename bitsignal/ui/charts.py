@@ -1,4 +1,4 @@
-"""Plotly charts for the new dashboard (plan item 36). Replaces cycle_gauge.py in S8.
+"""Plotly charts for the new dashboard (plan item 36).
 
 No constants of their own: thresholds and limits come from the config and the replay result.
 """
