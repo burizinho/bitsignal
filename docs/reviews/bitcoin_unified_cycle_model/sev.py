@@ -1,63 +1,106 @@
-"""Exploratory reproduction of the reversal-detector policy (Q5b) — version 2026-11-08.
+"""Independent oracle for the reversal detector (design §5), version 2026-11-08 (S5 rewrite).
 
-Implements exactly the rules of §5 of docs/designs/bitcoin_unified_cycle_model.md:
-  * armed in week t if a new all-time high of the weekly close happened in the last 52 weeks (incl. t);
-  * an episode opens on an armed trigger: 2 consecutive weekly closes < SMA30w and close <= 80% of the 52-week max;
-  * the episode closes after 2 consecutive weekly closes > SMA30w, even if arming expired meanwhile;
-  * a new episode needs a new armed trigger (not a new ATH);
-  * N1 = trigger (10%); N2 = N1 reached and 2 consecutive closes < SMA50w (25%);
-    N3 = N2 reached (this week or earlier in the episode) and close <= 60% of the 52-week max (50%).
+Offline and independent of the production code: uses only pandas/numpy and never imports
+``bitsignal`` or ``probe.py``. Reads the frozen CoinMetrics CSV and writes the episodes as JSON:
 
-Exploratory script, NOT a validated test. Uses probe.py only to load CoinMetrics data (network required).
+    python docs/reviews/bitcoin_unified_cycle_model/sev.py \
+        --csv data/historical/btc_coinmetrics.csv --out tests/golden/detector_episodes.json
+
+Rules (§5, default config numbers):
+  * weeks: Sundays (W-SUN) with a price, up to the last price date (closed weeks only);
+    windows count valid weekly rows and require a full window (min_periods = window);
+  * armed in week t if a new all-time high of the weekly close happened in the last 52 rows
+    (incl. t); the first week is not an ATH;
+  * trigger (opens an episode): armed, 2 consecutive closes < SMA30w, close <= 80% of the
+    52-week max;
+  * N2: 2 consecutive closes < SMA50w (may include the week before the trigger);
+    N3: N2 reached (this week or earlier) and close <= 60% of the 52-week max;
+  * order inside a week: trigger, N2, N3, closing test (not on the trigger week);
+  * closing: 2 consecutive closes > SMA30w; ``end`` = closing week; an open episode has end null.
 """
-import os
 
-_here = os.path.dirname(os.path.abspath(__file__))
-_src = open(os.path.join(_here, "probe.py"), encoding="utf-8").read()
-exec(_src.split('print("--- first crossings')[0].replace("print(", "(lambda *a, **k: None)("))
+import argparse
+import json
+import sys
 
-w = wk  # noqa: F821  (weekly closes, W-SUN, defined by probe.py)
-sma30 = w.rolling(30).mean()
-sma50 = w.rolling(50).mean()
-hi52 = w.rolling(52).max()
-ath = w.cummax()
-new_ath = ath > ath.shift(1)
-armed = new_ath.rolling(52, min_periods=1).max().astype(bool)
-below30 = (w < sma30) & (w.shift() < sma30.shift())
-below50 = (w < sma50) & (w.shift() < sma50.shift())
-trigger = armed & below30 & (w <= 0.80 * hi52)
+import numpy as np
+import pandas as pd
 
-episodes = []
-active = False
-above = 0
-for d in w.index:
-    if not active:
-        if trigger[d]:
-            active = True
-            ep = {"start": d, "n2": None, "n3": None}
-            above = 0
-    if active:
-        if ep["n2"] is None and below50[d]:
-            ep["n2"] = d
-        if ep["n2"] is not None and ep["n3"] is None and w[d] <= 0.60 * hi52[d]:
-            ep["n3"] = d
-        if d != ep["start"]:
-            above = above + 1 if w[d] > sma30[d] else 0
-            if above >= 2:
-                ep["end"] = d
+START = "2010-07-18"
+ARMING, TREND, N2_SMA, CONFIRM = 52, 30, 50, 2
+TRIGGER_RATIO, N3_RATIO = 0.80, 0.60
+
+
+def weekly_closes(csv_path: str) -> pd.Series:
+    df = pd.read_csv(csv_path, parse_dates=["date"], index_col="date").sort_index()
+    last = df["price"].dropna().index[-1]
+    cal = df.reindex(pd.date_range(START, last, freq="D"))
+    price = cal["price"]
+    sundays = price.index[(price.index.dayofweek == 6) & price.notna().to_numpy()]
+    return price.loc[sundays]
+
+
+def find_episodes(w: pd.Series) -> list:
+    values = w.to_numpy(dtype=float)
+    n = len(values)
+
+    def rolling_mean(k):
+        out = np.full(n, np.nan)
+        for i in range(k - 1, n):
+            out[i] = values[i - k + 1 : i + 1].mean()
+        return out
+
+    def rolling_max(k):
+        out = np.full(n, np.nan)
+        for i in range(k - 1, n):
+            out[i] = values[i - k + 1 : i + 1].max()
+        return out
+
+    sma30, sma50, high52 = rolling_mean(TREND), rolling_mean(N2_SMA), rolling_max(ARMING)
+    new_ath = [False] + [values[i] > values[:i].max() for i in range(1, n)]
+    armed = [any(new_ath[max(0, i - ARMING + 1) : i + 1]) for i in range(n)]
+
+    def held(cond, i):
+        return i >= CONFIRM - 1 and all(cond(j) for j in range(i - CONFIRM + 1, i + 1))
+
+    below30 = lambda j: values[j] < sma30[j]  # noqa: E731  (NaN comparisons are False)
+    above30 = lambda j: values[j] > sma30[j]  # noqa: E731
+    below50 = lambda j: values[j] < sma50[j]  # noqa: E731
+
+    episodes, ep = [], None
+    for i in range(n):
+        day = w.index[i].date().isoformat()
+        start_week = False
+        if ep is None and armed[i] and held(below30, i) and values[i] <= TRIGGER_RATIO * high52[i]:
+            ep = {"start": day, "n2": None, "n3": None, "end": None, "max_level": 1}
+            start_week = True
+        if ep is not None:
+            if ep["n2"] is None and held(below50, i):
+                ep["n2"], ep["max_level"] = day, 2
+            if ep["n2"] is not None and ep["n3"] is None and values[i] <= N3_RATIO * high52[i]:
+                ep["n3"], ep["max_level"] = day, 3
+            if not start_week and held(above30, i):
+                ep["end"] = day
                 episodes.append(ep)
-                active = False
-if active:
-    ep["end"] = w.index[-1]
-    episodes.append(ep)
+                ep = None
+    if ep is not None:
+        episodes.append(ep)
+    return episodes
 
-def fmt(d, ref):
-    return f"{d.date()} {w[d]:,.0f} ({w[d] / ref:.0%} da máx. 52s)" if d is not None else "não"
 
-for ep in episodes:
-    if ep["start"] < __import__("pandas").Timestamp("2014-01-01"):
-        continue
-    ref = hi52[ep["start"]]
-    fut = w.loc[ep["start"]:].iloc[1:79]
-    lvl = "N3" if ep["n3"] is not None else ("N2" if ep["n2"] is not None else "N1")
-    print(f"{ep['start'].date()} → {ep['end'].date()}  nível máx. {lvl}  | N1 {fmt(ep['start'], ref)} | N2 {fmt(ep['n2'], ref)} | N3 {fmt(ep['n3'], ref)} | 18m depois: máx {fut.max() / w[ep['start']]:.1f}x, mín {fut.min() / w[ep['start']]:.2f}x")
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--csv", required=True, help="frozen CoinMetrics CSV")
+    ap.add_argument("--out", help="write JSON here (default: print)")
+    args = ap.parse_args(argv)
+    eps = find_episodes(weekly_closes(args.csv))
+    text = json.dumps(eps, indent=2) + "\n"
+    if args.out:
+        with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+    else:
+        sys.stdout.write(text)
+
+
+if __name__ == "__main__":
+    main()

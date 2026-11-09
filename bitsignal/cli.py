@@ -227,22 +227,31 @@ def cmd_run_daily(args):
 
 
 def cmd_backtest(args):
-    """Execute Phase 1.5 Historical Backtest."""
-    print("Running BitSignal Phase 1.5 Historical Backtest...")
-    # Fetch historical daily data via yfinance or local dataset
+    """S5: backtest of the default model against the two Q1 benchmarks, offline (frozen CSV).
+
+    Default window: calibration (no 2019+ criteria). ``--window development`` needs the frozen
+    parameters file with a matching model_hash (S6).
+    """
+    from bitsignal.backtest.report import to_text
+    from bitsignal.config import load_config, load_frozen_params
+    from bitsignal.data.history import load_frozen_history
+
+    cfg = load_config()
+    frozen = load_frozen_params(cfg.backtest.frozen_params)
+    history = load_frozen_history(cfg.data.csv_path)
     try:
-        import yfinance as yf
-        print("Ingesting historical BTC daily data from 2012 to present...")
-        ticker = yf.Ticker("BTC-USD")
-        df = ticker.history(start=args.start or "2012-01-01", end=args.end or None, interval="1d")
-        if df.empty:
-            raise ValueError("Empty historical dataset returned.")
-        df = df.reset_index().rename(columns={"Date": "date", "Close": "close", "Open": "open", "High": "high", "Low": "low", "Volume": "volume"})
-        df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-        report = run_backtest(df)
-        print(report.summary())
-    except Exception as exc:
-        print(f"Error executing backtest: {exc}")
+        report = run_backtest(
+            history, cfg, window=args.window, frozen=frozen, sensitivities=not args.no_sensitivities
+        )
+    except ValueError as exc:
+        print(f"[ERRO] {exc}")
+        sys.exit(1)
+    print(to_text(report))
+    if args.window == "development" and frozen is not None and frozen.approval is not None:
+        a = frozen.approval
+        print("")
+        print(f"Approval gravado no S6 ({a.run_at:%Y-%m-%d}): {a.passed.model_dump()} {a.values.model_dump()}")
+        print("O recálculo acima é só exibição; o resultado oficial é o gravado.")
 
 
 def cmd_ui(args):
@@ -430,9 +439,10 @@ def main():
     p_run.add_argument("--dry-run", action="store_true", help="Calculate without sending real alerts")
 
     # backtest
-    p_bt = subparsers.add_parser("backtest", help="Execute Phase 1.5 Historical Backtest")
-    p_bt.add_argument("--start", default="2012-01-01", help="Start date (YYYY-MM-DD)")
-    p_bt.add_argument("--end", default=None, help="End date (YYYY-MM-DD)")
+    p_bt = subparsers.add_parser("backtest", help="Backtest the default model vs Q1 benchmarks (offline)")
+    p_bt.add_argument("--window", choices=["calibration", "development"], default="calibration",
+                      help="calibration (default, no 2019+ criteria) or development (needs frozen params)")
+    p_bt.add_argument("--no-sensitivities", action="store_true", help="Skip the sensitivities")
 
     # ui
     subparsers.add_parser("ui", help="Launch Streamlit dashboard")
