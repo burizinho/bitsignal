@@ -23,6 +23,7 @@ INPUT_KEYS = ("mvrv_z", "price_to_sma200w", "puell", "picycle", "rsi14w", "hash_
 HASH_RIBBON_STATES = ("NORMAL", "CAPITULATION", "BUY_RECOVERY")
 
 MODEL_FIELDS = ("score", "sell_ladder", "detector", "cap", "cycle", "buys")
+HASH_COMPAT_DEFAULTS = (("buys", "on_reset", "none"),)  # (block, key, value that reproduces v1)
 MODEL_BACKTEST_FIELDS = (
     "initial_btc",
     "reserve_btc_equiv",
@@ -134,6 +135,9 @@ class BuysConfig(_Strict):
     mode: Literal["score_dca", "uniform"]
     tiers: List[Tuple[float, float]]
     uniform_weeks: int = Field(gt=0)
+    # Phase 3 (v2): "all_cash" buys all remaining cash in the week a new cycle starts.
+    # "none" is the v1 rule and is left out of model_payload, so the v1 hash does not change.
+    on_reset: Literal["none", "all_cash"] = "none"
 
     @field_validator("tiers")
     @classmethod
@@ -190,6 +194,7 @@ class BacktestConfig(_Strict):
 class DataConfig(_Strict):
     csv_path: str
     max_staleness_days: int = Field(gt=0)
+    verdict_log_path: str = "data/verdicts/weekly_verdicts.csv"  # weekly log of this model
 
 
 class UiConfig(_Strict):
@@ -334,6 +339,10 @@ def model_payload(cfg: Config) -> Dict[str, Any]:
     """
     dumped = cfg.model_dump(mode="json")
     payload = {k: dumped[k] for k in MODEL_FIELDS}
+    # Fields added after the v1 freeze are omitted at their v1 value, so the v1 hash is stable.
+    for block, key, v1_value in HASH_COMPAT_DEFAULTS:
+        if payload[block].get(key) == v1_value:
+            del payload[block][key]
     payload["backtest"] = {k: dumped["backtest"][k] for k in MODEL_BACKTEST_FIELDS}
     return payload
 

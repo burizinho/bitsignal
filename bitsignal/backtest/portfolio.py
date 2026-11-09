@@ -85,8 +85,8 @@ def simulate(
             q_wanted = allowed
         sizing_base = cash if cmp_.buy_sizing == "cash" else reserve_usd
         usd_wanted = float(row["buy_pct"]) * sizing_base
-        if new_cycle and cmp_.leftover_on_reset:
-            usd_wanted = cash
+        if (new_cycle and cmp_.leftover_on_reset) or bool(row.get("buy_all_cash", False)):
+            usd_wanted = cash  # v2 rule (buys.on_reset) or the Phase 2 leftover_buy comparison
         if q_wanted <= EPS and usd_wanted <= EPS:
             continue
 

@@ -97,6 +97,7 @@ class Verdict:
     buy_pct: Optional[float] = None  # None shows as "—"
     reason: str = ""
     score_status: Optional[ScoreStatus] = None  # = status column of the last week
+    buy_all_cash: bool = False  # v2: a new cycle started this week -> buy with all available cash
 
 
 @dataclass

@@ -17,8 +17,6 @@ import pandas as pd
 
 from bitsignal.models import ReplayResult, Verdict
 
-DEFAULT_LOG_PATH = "data/verdicts/weekly_verdicts.csv"
-
 COLUMNS = [
     "week",
     "recorded_at",
@@ -57,7 +55,7 @@ def verdict_row(result: ReplayResult, verdict: Verdict, recorded_at: datetime) -
         "recorded_at": recorded_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "phase": verdict.phase.value,
         "sell_target": _num(verdict.sell_target, 4),
-        "buy_pct": _num(verdict.buy_pct, 4),
+        "buy_pct": "all_cash" if verdict.buy_all_cash else _num(verdict.buy_pct, 4),
         "score": _num(last["score"], 2),
         "score_min": _num(last["score_min"], 2),
         "score_max": _num(last["score_max"], 2),
@@ -79,6 +77,16 @@ def last_recorded_week(path: Union[str, Path]) -> Optional[str]:
     with io.open(p, encoding="utf-8", newline="") as f:
         weeks = [r["week"] for r in csv.DictReader(f)]
     return weeks[-1] if weeks else None
+
+
+def last_recorded_hash(path: Union[str, Path]) -> Optional[str]:
+    """``model_hash`` of the last row, so one file never mixes two models."""
+    p = Path(path)
+    if not p.exists():
+        return None
+    with io.open(p, encoding="utf-8", newline="") as f:
+        hashes = [r["model_hash"] for r in csv.DictReader(f)]
+    return hashes[-1] if hashes else None
 
 
 def append_verdict(path: Union[str, Path], row: Dict[str, str]) -> bool:

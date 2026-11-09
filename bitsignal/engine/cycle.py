@@ -78,6 +78,7 @@ def replay(weekly: pd.DataFrame, score_df: pd.DataFrame, detector_df: pd.DataFra
             events.append(Event(d, EventType.RESET_ARMED, "score", cyc.arm_score))
 
         v_esc = v_det_eff = buy = 0.0
+        buy_all_cash = False
         # 3. effective reset: new cycle; no ladder/detector this week
         if reset_pending and confirm_count >= cyc.confirm_weeks and level == 0:
             events.append(Event(d, EventType.CYCLE_START, "score", cyc.confirm_score, ratchet, 0.0))
@@ -86,6 +87,7 @@ def replay(weekly: pd.DataFrame, score_df: pd.DataFrame, detector_df: pd.DataFra
             cycle_start = t
             reset_pending = False
             arm_count = confirm_count = 0
+            buy_all_cash = cfg.buys.on_reset == "all_cash"  # v2: sale proceeds go back to BTC
         else:
             # 4. ratchet
             if status != UNAVAILABLE:
@@ -119,6 +121,7 @@ def replay(weekly: pd.DataFrame, score_df: pd.DataFrame, detector_df: pd.DataFra
                 "cycle_start_date": cycle_start,
                 "phase": phase.value,
                 "buy_pct": buy,
+                "buy_all_cash": buy_all_cash,
             }
         )
         prev_status = status
@@ -189,6 +192,10 @@ def latest_verdict(result: ReplayResult, now_utc: datetime, cfg: Config) -> Verd
         reason = f"reinício armado em {when}; score_max {smax_txt} → compra {_fmt_pct(row['buy_pct'])}"
     else:
         reason = f"sem sinal no ciclo iniciado em {cycle_start.isoformat()}"
+    buy_all_cash = bool(row.get("buy_all_cash", False))
+    if buy_all_cash:
+        reason = (f"ciclo novo iniciado em {cycle_start.isoformat()}: comprar com todo o caixa disponível "
+                  "(inclui o produto das vendas)")
     if status == ScoreStatus.INTERVAL:
         reason += " · score em intervalo"
     elif status == ScoreStatus.UNAVAILABLE:
@@ -206,4 +213,5 @@ def latest_verdict(result: ReplayResult, now_utc: datetime, cfg: Config) -> Verd
         buy_pct=buy,
         reason=reason,
         score_status=status,
+        buy_all_cash=buy_all_cash,
     )

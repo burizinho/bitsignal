@@ -19,6 +19,13 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 
+def _load_cfg(args):
+    """Config from ``--config`` (default: config/config.yaml, the dashboard model)."""
+    from bitsignal.config import load_config
+
+    return load_config(getattr(args, "config", None))
+
+
 def cmd_backtest(args):
     """S5: backtest of the default model against the two Q1 benchmarks, offline (frozen CSV).
 
@@ -26,10 +33,10 @@ def cmd_backtest(args):
     parameters file with a matching model_hash (S6).
     """
     from bitsignal.backtest.report import to_text
-    from bitsignal.config import load_config, load_frozen_params
+    from bitsignal.config import load_frozen_params
     from bitsignal.data.history import load_frozen_history
 
-    cfg = load_config()
+    cfg = _load_cfg(args)
     frozen = load_frozen_params(cfg.backtest.frozen_params)
     record = getattr(args, "record", False)
     if getattr(args, "variants", False):
@@ -175,6 +182,9 @@ def _record_refusal(args, cfg, frozen):
     """Reason to refuse ``--record``, or None."""
     from bitsignal.config import model_hash, repo_path
 
+    if cfg.buys.on_reset != "none":
+        return ("modelo v2: todas as janelas já foram vistas; a aprovação só vem da avaliação com dados "
+                "futuros (bitsignal forward-eval).")
     if args.window != "development":
         return "--record só vale com --window development."
     if frozen is None:
@@ -209,13 +219,12 @@ def cmd_evaluate(args):
     """S7: print the verdict of the latest closed week from live CoinMetrics data."""
     from datetime import datetime, timezone
 
-    from bitsignal.config import load_config
     from bitsignal.data.coinmetrics import fetch_coinmetrics
     from bitsignal.data.history import from_frame
     from bitsignal.engine.cycle import latest_verdict
     from bitsignal.engine.pipeline import run_model
 
-    cfg = load_config()
+    cfg = _load_cfg(args)
     history = from_frame(fetch_coinmetrics(), source="coinmetrics_live")
     result = run_model(history, cfg)
     v = latest_verdict(result, datetime.now(timezone.utc), cfg)
@@ -223,9 +232,12 @@ def cmd_evaluate(args):
     if v.phase is None:
         print(f"Sem veredito: {v.reason}")
         return
-    buy = "—" if v.buy_pct is None else f"{v.buy_pct * 100:.0f}%"
+    if v.buy_all_cash:
+        buy = "todo o caixa disponível (inclui o produto das vendas)"
+    else:
+        buy = ("—" if v.buy_pct is None else f"{v.buy_pct * 100:.0f}%") + " da reserva-base"
     print(f"Fase: {v.phase.label} · venda acumulada-alvo: {v.sell_target * 100:.0f}% da posição-base "
-          f"(ciclo iniciado em {v.cycle_start_date}) · compra: {buy} da reserva-base")
+          f"(ciclo iniciado em {v.cycle_start_date}) · compra: {buy}")
     print(f"Motivo: {v.reason}")
     print("Eventos do ciclo:")
     for e in result.events:
@@ -246,14 +258,14 @@ def cmd_record_verdict(args):
     Exit 1 without writing when the data is stale or the source fails, so the scheduled job
     shows the failure instead of recording a week without a verdict.
     """
-    from bitsignal.config import load_config, repo_path
+    from bitsignal.config import repo_path
     from bitsignal.data.coinmetrics import fetch_coinmetrics
     from bitsignal.data.history import from_frame
     from bitsignal.engine.cycle import latest_verdict
     from bitsignal.engine.pipeline import run_model
-    from bitsignal.verdict_log import DEFAULT_LOG_PATH, append_verdict, verdict_row
+    from bitsignal.verdict_log import append_verdict, last_recorded_hash, verdict_row
 
-    cfg = load_config()
+    cfg = _load_cfg(args)
     now = _now_utc()
     history = from_frame(fetch_coinmetrics(), source="coinmetrics_live")
     result = run_model(history, cfg)
@@ -261,12 +273,40 @@ def cmd_record_verdict(args):
     if v.phase is None:
         print(f"[ERRO] Semana {v.week}: sem veredito ({v.reason}). Nada gravado.")
         sys.exit(1)
-    path = repo_path(args.out or DEFAULT_LOG_PATH)
+    path = repo_path(args.out or cfg.data.verdict_log_path)
+    logged = last_recorded_hash(path)
+    if logged is not None and logged != result.model_hash:
+        print(f"[ERRO] {path} registra outro modelo (model_hash {logged[:12]}…); "
+              f"este config é {result.model_hash[:12]}…. Nada gravado.")
+        sys.exit(1)
     if append_verdict(path, verdict_row(result, v, now)):
         print(f"[OK] Semana {v.week} gravada em {path}: {v.phase.label}, "
               f"venda-alvo {v.sell_target * 100:.0f}%.")
     else:
         print(f"[OK] Semana {v.week} já estava gravada; nada mudou.")
+
+
+V1_CONFIG = "config/config_v1.yaml"
+
+
+def cmd_forward_eval(args):
+    """Phase 3 (E4): v2 vs v1, buy-and-hold and uniform DCA from the v2 freeze date. Display only."""
+    from bitsignal.backtest.forward import forward_eval, to_text
+    from bitsignal.config import load_config, load_frozen_params
+    from bitsignal.data.coinmetrics import fetch_coinmetrics
+    from bitsignal.data.history import from_frame, load_frozen_history
+
+    cfg_v2 = _load_cfg(args)
+    cfg_v1 = load_config(V1_CONFIG)
+    frozen = load_frozen_params(cfg_v2.backtest.frozen_params)
+    if frozen is None:
+        print("[ERRO] o v2 ainda não foi congelado (backtest.frozen_params vazio).")
+        sys.exit(1)
+    if args.offline:
+        history = load_frozen_history(cfg_v2.data.csv_path)
+    else:
+        history = from_frame(fetch_coinmetrics(), source="coinmetrics_live")
+    print(to_text(forward_eval(history, cfg_v2, cfg_v1, frozen.frozen_at.date())))
 
 
 def cmd_ui(args):
@@ -319,6 +359,7 @@ def main():
     p_bt = subparsers.add_parser("backtest", help="Backtest the default model vs Q1 benchmarks (offline)")
     p_bt.add_argument("--window", choices=["calibration", "development"], default="calibration",
                       help="calibration (default, no 2019+ criteria) or development (needs frozen params)")
+    p_bt.add_argument("--config", default=None, help="Config file (default: config/config.yaml)")
     p_bt.add_argument("--no-sensitivities", action="store_true", help="Skip the sensitivities")
     p_bt.add_argument("--variants", action="store_true",
                       help="Phase 2: default model plus the comparison variants (never recorded)")
@@ -328,12 +369,18 @@ def main():
     p_fz = subparsers.add_parser("freeze-params", help="Freeze the model parameters (S6)")
     p_fz.add_argument("--out", default=None, help="Default: config/frozen/params_<date>.yaml")
 
-    subparsers.add_parser("evaluate", help="Print the model verdict for the latest closed week (live data)")
+    p_ev = subparsers.add_parser("evaluate", help="Print the model verdict for the latest closed week (live data)")
+    p_ev.add_argument("--config", default=None, help="Config file (default: config/config.yaml)")
     subparsers.add_parser("ui", help="Launch the Streamlit dashboard")
+
+    p_fe = subparsers.add_parser("forward-eval", help="Phase 3: forward evaluation of v2 (display only)")
+    p_fe.add_argument("--config", default=None, help="v2 config (default: config/config.yaml)")
+    p_fe.add_argument("--offline", action="store_true", help="Use the frozen CSV instead of live data")
 
     p_rv = subparsers.add_parser("record-verdict",
                                  help="Append the latest closed week's verdict to the weekly log")
-    p_rv.add_argument("--out", default=None, help="Default: data/verdicts/weekly_verdicts.csv")
+    p_rv.add_argument("--out", default=None, help="Default: data.verdict_log_path of the config")
+    p_rv.add_argument("--config", default=None, help="Config file (default: config/config.yaml)")
 
     args = parser.parse_args()
     commands = {
@@ -343,6 +390,7 @@ def main():
         "evaluate": cmd_evaluate,
         "ui": cmd_ui,
         "record-verdict": cmd_record_verdict,
+        "forward-eval": cmd_forward_eval,
     }
     commands[args.command](args)
 

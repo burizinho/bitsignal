@@ -71,7 +71,7 @@ def test_freeze_writes_schema_and_points_config(tmp_path, cfg_copy):
     pointed = load_config(cfg_copy)
     assert pointed.backtest.frozen_params == str(out)
     assert model_hash(pointed) == frozen.model_hash  # the pointer is outside the hash
-    assert "# caminho do arquivo congelado" in cfg_copy.read_text(encoding="utf-8")  # comment kept
+    assert "fora do model_hash" in cfg_copy.read_text(encoding="utf-8")  # comment kept
 
 
 # ---------------------------------------------------------------- --record
@@ -79,7 +79,7 @@ def test_freeze_writes_schema_and_points_config(tmp_path, cfg_copy):
 
 @pytest.fixture
 def frozen_setup(tmp_path):
-    base = load_config()
+    base = load_config("config/config_v1.yaml")  # the S6 record flow is the v1 one
     path = tmp_path / "frozen.yaml"
     cfg = apply_overrides(base, {"backtest": {"frozen_params": str(path)}})
     frozen = FrozenParams(frozen_at=datetime.now(timezone.utc), csv_sha256="abc",
