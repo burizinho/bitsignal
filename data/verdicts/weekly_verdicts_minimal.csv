@@ -1,0 +1,2 @@
+week,recorded_at,phase,sell_target,buy_pct,score,score_min,score_max,score_status,detector_level,reset_pending,cycle_start_date,price_usd,data_as_of,model_hash,reason
+2026-11-08,2026-11-09T23:23:21Z,HOLD,0.0000,,,,,,0,false,2026-08-16,74967.72,2026-11-08,4da8df40adab3cb0a00b42eb55d5f6118759b304ca92e4f1b6cf10f664ad3c93,minimal: preço/SMA200w 1.11; ciclo iniciado em 2026-08-16
