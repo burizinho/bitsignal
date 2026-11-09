@@ -83,3 +83,44 @@ def test_app_py_as_main_file_renders_page():
         os.chdir(old_cwd)
 
     assert [t.value for t in at.title], "running app.py directly rendered nothing"
+
+
+def _run_app_header(loaded_at):
+    """Run app.py's module body (not as __main__) with the package marked as imported at ``loaded_at``."""
+    import sys
+
+    import bitsignal
+    import bitsignal.config
+
+    snapshot = {k: v for k, v in sys.modules.items() if k == "bitsignal" or k.startswith("bitsignal.")}
+    old_config = sys.modules["bitsignal.config"]
+    original = bitsignal._LOADED_AT
+    if loaded_at is None:
+        del bitsignal._LOADED_AT
+    else:
+        bitsignal._LOADED_AT = loaded_at
+    try:
+        runpy.run_path(str(ROOT / "bitsignal" / "ui" / "app.py"), run_name="app_header_test")
+        return sys.modules.get("bitsignal.config") is old_config
+    finally:
+        bitsignal._LOADED_AT = original
+        for k in [k for k in sys.modules if k == "bitsignal" or k.startswith("bitsignal.")]:
+            del sys.modules[k]
+        sys.modules.update(snapshot)
+
+
+def test_stale_modules_are_reloaded_after_a_redeploy():
+    """Streamlit Cloud keeps imported modules across a redeploy: a source file newer than the import
+    must force a fresh import (otherwise the old config.py rejects the new config.yaml)."""
+    assert _run_app_header(loaded_at=0.0) is False  # files changed after "import": reloaded
+
+
+def test_unchanged_modules_are_kept():
+    import time
+
+    assert _run_app_header(loaded_at=time.time() + 3600) is True  # nothing changed: same module
+
+
+def test_package_without_load_time_is_treated_as_stale():
+    """The version in memory before this fix has no _LOADED_AT: it must be reloaded too."""
+    assert _run_app_header(loaded_at=None) is False
