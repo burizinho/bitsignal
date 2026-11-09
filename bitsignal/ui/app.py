@@ -331,3 +331,8 @@ def main():
         render_glossary()
     st.caption("Dados: CoinMetrics Community (CC BY-NC 4.0). Uso não comercial.")
 
+
+# Streamlit Cloud may run this file directly as the app's main file. Streamlit executes it as
+# __main__ on every run, so render here too; importing it (streamlit_app.py) does not call main().
+if __name__ == "__main__":
+    main()
