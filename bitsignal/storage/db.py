@@ -142,7 +142,8 @@ def upsert_daily_metrics(metrics: DailyMetrics, db_path: str = "./data/bitsignal
         mvrv_z = excluded.mvrv_z,
         puell_multiple = excluded.puell_multiple,
         hashrate = excluded.hashrate,
-        hash_ribbon_status = excluded.hash_ribbon_status;
+        hash_ribbon_status = excluded.hash_ribbon_status,
+        created_at = CURRENT_TIMESTAMP;
     """
     with get_connection(db_path) as conn:
         conn.execute(query, metrics.model_dump())
@@ -169,7 +170,8 @@ def upsert_daily_score(score: DailyCompositeResult, db_path: str = "./data/bitsi
         hashribbon_score = excluded.hashribbon_score,
         system_status = excluded.system_status,
         hysteresis_state = excluded.hysteresis_state,
-        stale_metrics = excluded.stale_metrics;
+        stale_metrics = excluded.stale_metrics,
+        created_at = CURRENT_TIMESTAMP;
     """
     params = {
         "date": score.date,

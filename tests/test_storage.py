@@ -119,3 +119,44 @@ def test_record_alert_dispatch(temp_db):
         db_path=temp_db,
     )
     assert alert_id == 1
+
+
+def test_upserts_refresh_created_at(temp_db):
+    """S1 stopgap: a second upsert on the same date refreshes created_at.
+
+    Without this the old dashboard sees the row as stale after one hour and reruns the whole
+    pipeline on every visit.
+    """
+    import sqlite3
+
+    metrics = DailyMetrics(
+        date="2026-11-01", btc_price=68000.0, open=67500.0, high=68500.0, low=67000.0,
+        volume=12000.0, sma_111=65000.0, sma_350=58000.0, sma_471=55000.0, ema_150=64000.0,
+        sma_200w=38000.0, rsi_14w=65.0, mvrv_z=2.45, puell_multiple=1.20, hashrate=6.2e20,
+        hash_ribbon_status="NORMAL",
+    )
+    score = DailyCompositeResult(
+        date="2026-11-01", composite_score=78.5, mvrv_score=80.0, sma200w_score=75.0,
+        puell_score=70.0, picycle_score=85.0, rsi_score=72.0, hashribbon_score=50.0,
+        system_status=SystemStatus.HEALTHY, hysteresis_state=HysteresisState.NEUTRAL,
+        stale_metrics=None,
+    )
+    upsert_daily_metrics(metrics, temp_db)
+    upsert_daily_score(score, temp_db)
+
+    old = "2000-01-01 00:00:00"
+    conn = sqlite3.connect(temp_db)
+    conn.execute("UPDATE daily_metrics SET created_at = ?", (old,))
+    conn.execute("UPDATE daily_scores SET created_at = ?", (old,))
+    conn.commit()
+    conn.close()
+
+    upsert_daily_metrics(metrics, temp_db)
+    upsert_daily_score(score, temp_db)
+
+    conn = sqlite3.connect(temp_db)
+    m_ts = conn.execute("SELECT created_at FROM daily_metrics").fetchone()[0]
+    s_ts = conn.execute("SELECT created_at FROM daily_scores").fetchone()[0]
+    conn.close()
+    assert m_ts != old
+    assert s_ts != old
