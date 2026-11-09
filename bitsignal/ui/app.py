@@ -52,7 +52,7 @@ from bitsignal.data.history import derive_daily, from_frame, load_frozen_history
 from bitsignal.engine.cycle import data_status, latest_verdict  # noqa: E402
 from bitsignal.engine.pipeline import run_model  # noqa: E402
 from bitsignal.models import DataStatus, InputState, Phase, ScoreStatus  # noqa: E402
-from bitsignal.ui import charts  # noqa: E402
+from bitsignal.ui import calculator, charts  # noqa: E402
 
 # --------------------------------------------------------------------------------------
 # Injection points (module level; patched by tests/test_app_smoke.py)
@@ -144,6 +144,39 @@ def render_spot():
     else:
         price, ts = spot
         st.caption(f"Preço agora (yfinance, somente exibição): US$ {price:,.0f} às {ts:%H:%M} UTC")
+
+
+def render_calculator(verdict, week_close: float):
+    """Percentages -> amounts from numbers typed by the user. Session only: nothing is stored."""
+    spot = cached_spot()
+    price, source = (spot[0], "preço agora (yfinance)") if spot else (week_close, "fechamento da semana")
+    with st.expander("Calculadora: converter os percentuais em valores (opcional)"):
+        st.caption("Os números digitados ficam só nesta sessão do navegador: não são gravados nem viram "
+                   f"registro de operações. Valores brutos, sem custos. Preço usado: {source}, US$ {price:,.0f}.")
+        c1, c2 = st.columns(2)
+        base = c1.number_input("BTC no início do ciclo (posição-base)", min_value=0.0, value=0.0,
+                               step=0.01, format="%.8f", key="calc_base_btc")
+        sold = c1.number_input("BTC já vendidos neste ciclo", min_value=0.0, value=0.0,
+                               step=0.01, format="%.8f", key="calc_sold_btc")
+        reserve = c2.number_input("Reserva-base (USD)", min_value=0.0, value=0.0, step=100.0,
+                                  format="%.2f", key="calc_reserve_usd")
+        cash = c2.number_input("Caixa disponível agora (USD)", min_value=0.0, value=0.0, step=100.0,
+                               format="%.2f", key="calc_cash_usd")
+        a = calculator.compute(verdict, price, base, sold, reserve, cash)
+        lines = []
+        if a.sell_target_btc is not None:
+            lines.append(f"Venda acumulada-alvo do ciclo: **{a.sell_target_btc:.8f} BTC** "
+                         f"({_pct(verdict.sell_target)} de {base:.8f} BTC). Falta vender: **{a.to_sell_btc:.8f} BTC** "
+                         f"(≈ US$ {a.to_sell_usd:,.0f}).")
+        if verdict.buy_all_cash:
+            lines.append(f"Compra desta semana: **todo o caixa**, US$ {a.buy_usd:,.2f} ≈ **{a.buy_btc:.8f} BTC**."
+                         if a.buy_usd else "Compra desta semana: todo o caixa disponível (informe o caixa).")
+        elif a.buy_usd is not None:
+            limit = " (limitada ao caixa informado)" if a.buy_limited_by_cash else ""
+            lines.append(f"Compra desta semana: **US$ {a.buy_usd:,.2f}** ≈ **{a.buy_btc:.8f} BTC**{limit}.")
+        elif not verdict.buy_pct:
+            lines.append("Sem compra programada nesta semana.")
+        st.markdown("\n\n".join(lines) if lines else "Informe os valores acima para ver as quantidades.")
 
 
 def render_unavailable(cfg, reason: str, context_history=None):
@@ -343,6 +376,7 @@ def main():
         c2.plotly_chart(charts.sell_target_gauge(verdict.sell_target, cfg.cap.cap), width="stretch")
         c2.caption(f"Venda acumulada-alvo: {_pct(verdict.sell_target)} de no máximo {_pct(cfg.cap.cap)} da posição-base.")
         render_detector(result)
+        render_calculator(verdict, float(last["price"]))
     with tab_inputs:
         render_inputs(result, history, cfg)
         render_dune(history, cfg)
