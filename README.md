@@ -14,13 +14,26 @@ O design completo está em [docs/designs/bitcoin_unified_cycle_model.md](docs/de
 ## O que o painel mostra
 
 * **Linha do topo:** semana fechada, fase (ACUMULAR, MANTER ou DISTRIBUIR), venda acumulada-alvo no
-  ciclo (% da posição-base), compra da semana (% da reserva-base) e o motivo.
-* **Insumos:** valor e estado de cada indicador (presente, aquecimento ou ausente) e o score.
-* **Detector de reversão:** armamento, nível atual e episódios.
-* **Ciclo:** gráfico de preço com as fases e o registro de eventos do ciclo atual.
-* **Conferência com o Dune** (opcional): compara o último dado do CoinMetrics com uma consulta do Dune.
-* **Backtest:** curvas de patrimônio do modelo, de comprar e segurar e do DCA uniforme, com os
-  critérios gravados.
+  ciclo (% da posição-base), compra da semana (% da reserva-base, ou todo o caixa na semana de
+  reinício do v2) e o motivo. O rodapé diz qual modelo está em uso.
+* **Aba Semana:**
+  * medidores do score e da venda acumulada-alvo, e o estado do detector de reversão;
+  * **O que mudaria o veredito:** os próximos gatilhos do modelo (reinício do ciclo, compra maior,
+    próximo degrau da escada, detector) e a distância da última semana até cada um. Só explica;
+    não muda o veredito;
+  * **Calculadora:** converte os percentuais em BTC e USD a partir de valores digitados (posição-base,
+    BTC já vendidos, reserva-base, caixa). Nada é gravado;
+  * **Exportar para a planilha:** CSV do veredito da semana e do registro semanal gravado, no formato
+    de Excel/Planilhas em português (`;` e vírgula decimal) ou internacional.
+* **Insumos:** valor e estado de cada indicador (presente, aquecimento ou ausente) e a conferência
+  opcional com o Dune.
+* **Ciclo e eventos:** gráfico de preço com as fases e o registro de eventos do ciclo atual.
+* **Backtest:** curvas de patrimônio do modelo, de comprar e segurar e do DCA uniforme. Para um modelo
+  sem avaliação gravada (o v2), mostra só a janela de calibração.
+* **Glossário.**
+
+Manual para quem vai usar o painel: [docs/manual/Manual_BitSignal.pdf](docs/manual/Manual_BitSignal.pdf)
+(gerado por `python docs/manual/build_manual.py`).
 
 Se os dados estiverem desatualizados (mais de 9 dias) ou a fonte estiver fora do ar, o painel não
 mostra veredito e oferece "Tentar de novo".
