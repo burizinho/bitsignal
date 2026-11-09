@@ -147,4 +147,4 @@ def test_git_check_rejects_untracked_and_accepts_committed(tmp_path):
     untracked = tmp_path / "x.yaml"
     untracked.write_text("a: 1", encoding="utf-8")
     assert cli._git_committed_clean(untracked) is False
-    assert cli._git_committed_clean(REPO_ROOT / "pyproject.toml") is True
+    assert cli._git_committed_clean(REPO_ROOT / "config" / "frozen" / "params_2026-11-09.yaml") is True

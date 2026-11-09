@@ -120,7 +120,7 @@ def top_line(verdict, cfg) -> str:
     return (
         f"Semana fechada em {_d(verdict.week)} · **{verdict.phase.label}** · "
         f"Venda acumulada-alvo no ciclo: **{_pct(verdict.sell_target)}** da posição-base "
-        f"(ciclo iniciado em {_d(verdict.cycle_start)}) · "
+        f"(ciclo iniciado em {_d(verdict.cycle_start_date)}) · "
         f"Compra programada nesta semana: **{buy}** da reserva-base · Motivo: {verdict.reason}"
     )
 
@@ -188,7 +188,7 @@ def render_detector(result):
 
 
 def render_cycle(result, verdict, cfg):
-    cycle_start = pd.Timestamp(verdict.cycle_start)
+    cycle_start = pd.Timestamp(verdict.cycle_start_date)
     weeks = result.weeks.loc[cycle_start:]
     st.plotly_chart(charts.price_phases_chart(result.weeks.iloc[-260:], result.events), width="stretch")
     st.caption(f"Recalculado em {now_utc():%d/%m/%Y %H:%M} UTC. {RECONSTRUCTION_NOTICE}")

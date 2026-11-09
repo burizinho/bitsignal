@@ -1,7 +1,6 @@
 # BitSignal — config do modelo de ciclo unificado (Fase 1).
 # Schema e validação: bitsignal/config.py. Regras: docs/designs/bitcoin_unified_cycle_model.md (§2–§8).
-# Os blocos antigos (system, metrics, integrity, alerting, endpoints, strategy) saíram no S2;
-# o painel antigo não depende deles (strategy.* tem defaults em weekly_evaluator.py).
+# Os blocos antigos (system, metrics, integrity, alerting, endpoints, strategy) saíram no S2.
 
 score:
   inputs:                      # chaves canônicas usadas no código e nos selos

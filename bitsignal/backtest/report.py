@@ -14,7 +14,7 @@ import pandas as pd
 
 from bitsignal.models import EventType
 
-HEADER = "2019 até o congelamento é validação histórica de desenvolvimento, não amostra independente."
+HEADER = "Janela de desenvolvimento (2019+): de 2019 até o congelamento; validação histórica, não amostra independente."
 
 
 def _pct(x) -> str:
@@ -30,7 +30,7 @@ def to_text(report) -> str:
         "=" * 72,
     ]
     if report.criteria is None:
-        lines.append("Critérios Q1: não calculados nesta janela (só depois do congelamento, janela de desenvolvimento).")
+        lines.append("Critérios Q1: não calculados nesta janela (só depois do congelamento, na janela de desenvolvimento (2019+)).")
     else:
         v, p = report.criteria["values"], report.criteria["passed"]
         ok = lambda b: "APROVADO" if b else "NÃO APROVADO"  # noqa: E731

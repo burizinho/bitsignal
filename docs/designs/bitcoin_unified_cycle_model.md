@@ -689,7 +689,7 @@ Etapas da Fase 1, nesta ordem. Cada etapa tem um ou mais commits e termina com o
 | **S4** | Motor puro (`engine/`) e testes técnicos de motor, incluindo paridade e ausência de informação futura | S3 | Os testes do item 25 e todos os anteriores passam sem rede |
 | **S5** | Golden do detector, backtest essencial (padrão + 2 benchmarks + sensibilidades), comando `backtest` novo | S4 | Os testes dos itens 27 e 34 e todos os anteriores passam sem rede; `bitsignal backtest --window calibration` roda em < 60 s |
 | **S6** | Congelamento e validação única 2019+ | S5 | Arquivo congelado versionado; aprovação técnica OK; `approval` gravado uma única vez num commit separado |
-| **S7** | Painel novo | S6 | `tests/test_app_smoke.py` passa; checagens manuais do Verification Plan |
+| **S7** | Painel novo | S6 | `tests/test_app_smoke.py` passa; checagens manuais dos itens E2E/Integration do Verification Plan |
 | **S8** | Remover código morto e comandos antigos | S7 | `pytest -q` e `ruff check` passam; nenhum import dos módulos apagados |
 | **S9** | Dependências fixadas, cobertura e documentação | S8 | Build limpo em Python 3.11; metas de cobertura atingidas |
 
@@ -724,7 +724,7 @@ Etapas da Fase 1, nesta ordem. Cada etapa tem um ou mais commits e termina com o
 *   **Type / Scope**: Painel atual.
 *   **Proposed Changes**: Envolver o corpo do módulo (depois do bloco de `sys.path` das linhas 10–23, que fica no nível do módulo) numa função `main()`, sem mudar o comportamento. `st.set_page_config` é a primeira chamada dentro de `main()`. Acrescentar no topo `st.warning("Em revisão: as ordens desta tela vêm do modelo antigo e não devem ser seguidas.")`. O aviso sai no S7.
 
-##### 3. `bitsignal/cli.py` (Modify, aditivo)
+##### 3. `bitsignal/cli.py` (Modify)
 
 *   **Type / Scope**: CLI.
 *   **Proposed Changes**: `cmd_ui` passa a rodar `streamlit run <raiz>/streamlit_app.py` (hoje roda `bitsignal/ui/app.py`, que depois do S0 só define `main()` e ficaria em branco).
@@ -955,7 +955,7 @@ Etapas da Fase 1, nesta ordem. Cada etapa tem um ou mais commits e termina com o
 *   **Type / Scope**: Máquina de estados.
 *   **Proposed Changes**:
     *   `replay(weekly, score_df, detector_df, cfg) -> tuple[pd.DataFrame, list[Event]]`. Estado inicial: `cycle_id = 0`, `cycle_start_date` = primeira semana, `ratchet_sell = 0`, `reset_pending = False`, contadores 0. Implementa os passos 1–5 do §6, na ordem. O passo 5 tem um ramo para `buys.mode = "uniform"` (usado só pelo benchmark, item 29): `buy_pct = 1 / uniform_weeks` em toda semana com `reset_pending`, qualquer que seja o status do score.
-    *   Colunas devolvidas (além das de entrada): `score`, `score_min`, `score_max`, `status`, `level`, `armed`, `episode_id`, `v_esc`, `v_det`, `v_det_eff`, `ratchet_sell`, `reset_pending`, `cycle_id`, `cycle_start_date`, `phase`, `buy_pct`.
+    *   Colunas devolvidas além das colunas de `weekly`: `score`, `score_min`, `score_max`, `status`, `level`, `armed`, `episode_id`, `v_esc`, `v_det`, `v_det_eff`, `ratchet_sell`, `reset_pending`, `cycle_id`, `cycle_start_date`, `phase`, `buy_pct`.
     *   **Eventos** (um por ocorrência):
 
         | Tipo | Quando | `mechanism` | `threshold` | `before` / `after` |
@@ -980,7 +980,7 @@ Etapas da Fase 1, nesta ordem. Cada etapa tem um ou mais commits e termina com o
 *   **`test_weekly.py`:** semana sem `price` no domingo é descartada; com `price` e outra série ausente entra com `MISSING`; `WARMUP` × `MISSING`; semana ainda aberta (domingo > `as_of`) é descartada; primeira semana não é ATH; Hash Ribbon: cruzamento na quarta → BUY_RECOVERY; cruzamento na quarta e `SMA30 < SMA60` no domingo → CAPITULATION; igualdade no dia do cruzamento conta.
 *   **`test_score.py`:** os três status; intervalo com 10% ausente (10 pontos de largura); Hash Ribbon ausente usa 10–50; nenhum NaN vira 50.
 *   **`test_detector.py`** (séries sintéticas): armamento expira depois de 52 semanas sem ATH; episódio abre só armado; não repete disparo; nível só sobe; episódio continua depois que o armamento expira; episódio novo exige disparo armado mas não ATH novo; N2 com a semana anterior ao disparo; N3 só com N2 atingido; N2 e N3 na mesma semana do disparo; na semana do fechamento `level` mantém o nível e volta a 0 na seguinte; `episodes()` devolve `end` = semana do fechamento.
-*   **`test_cycle.py`:** catraca nunca desce no ciclo; reinício em duas etapas (15, 15, 35, 35); semana `UNAVAILABLE` não conta nem zera; reinício só com `level == 0`; na semana do reinício não se aplica escada nem detector; o reinício não acontece na semana de fechamento de um episódio; `buy_pct` não depende de `cycle_id`; ramo `uniform` compra `1/52` em semana `UNAVAILABLE` com `reset_pending`; compra e venda nunca na mesma semana; `v_det_eff = 0` com `reset_pending`; teto `1 − floor`; um caso por linha da tabela de eventos e um por fase do `reason`; `data_status` com fim da semana 8 dias antes → `OK` e 10 dias antes → `STALE`; `latest_verdict` sem fase quando `STALE`.
+*   **`test_cycle.py`:** catraca nunca desce no ciclo; reinício em duas etapas: armado na 2ª semana, efetivado na 4ª (scores 15, 15, 35, 35); semana `UNAVAILABLE` não conta nem zera; reinício só com `level == 0`; na semana do reinício não se aplica escada nem detector; o reinício não acontece na semana de fechamento de um episódio; `buy_pct` não depende de `cycle_id`; ramo `uniform` compra `1/52` em semana `UNAVAILABLE` com `reset_pending`; compra e venda nunca na mesma semana; `v_det_eff = 0` com `reset_pending`; teto `1 − floor`; um caso por linha da tabela de eventos e um por fase do `reason`; `data_status` com fim da semana 8 dias antes → `OK` e 10 dias antes → `STALE`; `latest_verdict` sem fase quando `STALE`.
 *   **`test_no_lookahead.py`:** com `numpy.random.default_rng(20261108)`, 20 datas t; `run_model(history.truncate(t)).weeks` igual a `run_model(history).weeks` até t, coluna a coluna (CSV congelado).
 *   **`test_parity.py`:** resposta HTTP simulada montada a partir do CSV congelado; o caminho do painel (`fetch_coinmetrics` → `from_frame` → `run_model`) e o do backtest (`load_frozen_history` → `run_model`) produzem `weeks` idênticos.
 
@@ -1037,7 +1037,7 @@ Etapas da Fase 1, nesta ordem. Cada etapa tem um ou mais commits e termina com o
     *   `@dataclass BacktestReport`: `window: Literal["calibration", "development"]`, `model_hash`, `csv_sha256` (de `MarketHistory.csv_sha256`), `start: date`, `end: date`, `strategy: Simulation`, `bnh: Simulation`, `uniform: Simulation`, `criteria: dict | None` (só na janela `development`), `diagnostics: DataFrame`, `false_resets: int`, `reserve_usage: DataFrame`, `sensitivities: dict[str, dict]`.
     *   `run_backtest(history, cfg, window="calibration", frozen: FrozenParams | None = None, sensitivities=True) -> BacktestReport`:
         *   `start` = `cfg.backtest.start` resolvido para uma semana: `first_all_valid_week` = primeira semana com os seis `state_* == PRESENT`; uma data = primeira semana W-SUN cujo domingo é ≥ a data. `ratchet_at_start` = `ratchet_sell` do replay nessa semana.
-        *   `window="calibration"`: simula até `calibration_end`; **não** calcula critérios 2019+.
+        *   `window="calibration"`: simula até `calibration_end`; **não** calcula critérios da janela de desenvolvimento (2019+).
         *   `window="development"`: exige `frozen` com `model_hash == model_hash(cfg)`; simula até o fim e calcula `criteria`.
         *   `sensitivities`: roda cada override de `backtest.sensitivities` na mesma janela, chamando `run_model` + `simulate` diretamente (sem checagem de hash, que vale só para o `cfg` base). Sensibilidade cujo `start` cai depois do fim da janela é reportada como "não aplicável" (ex.: `late_entry_2019` na calibração).
         *   Benchmarks também chamam `run_model`/`simulate` diretamente.
@@ -1046,7 +1046,7 @@ Etapas da Fase 1, nesta ordem. Cada etapa tem um ou mais commits e termina com o
 ##### 32. `bitsignal/backtest/report.py` (Create)
 
 *   **Type / Scope**: Saída.
-*   **Proposed Changes**: `to_text(report) -> str` (CLI) e `to_frames(report) -> dict[str, DataFrame]` (UI: `criteria`, `diagnostics`, `equity`, `phases`). Cabeçalho fixo: "2019 até o congelamento é validação histórica de desenvolvimento, não amostra independente."
+*   **Proposed Changes**: `to_text(report) -> str` (CLI) e `to_frames(report) -> dict[str, DataFrame]` (UI: `criteria`, `diagnostics`, `equity`, `phases`). Cabeçalho fixo: "Janela de desenvolvimento (2019+): de 2019 até o congelamento; validação histórica, não amostra independente."
 
 ##### 33. `bitsignal/cli.py` (Modify)
 
@@ -1056,7 +1056,7 @@ Etapas da Fase 1, nesta ordem. Cada etapa tem um ou mais commits e termina com o
 ##### 34. Testes de backtest (Create/Modify): `tests/test_backtest.py` (reescrita) e `tests/test_golden.py` + `tests/golden/replay_summary.json`
 
 *   **`test_backtest.py`** (séries sintéticas): preço sobe 2× e cai 50% com patrimônio, queda máxima e critérios calculados à mão; compra limitada ao caixa; custo aplicado; execução no dia D+lag e fallback de 7 dias; operação descartada registrada; comprar e segurar usa todo o capital; uniforme compra `1/52` em semana `UNAVAILABLE` com `reset_pending`; conservação de patrimônio numa série com reinícios e fases alternadas; `ratchet_at_start` impede vendas retroativas; rebase deixa as três curvas em 100 e descarta as linhas anteriores; total gasto em compras ≤ `reserve_usd` + produto das vendas, e `CYCLE_START` não aumenta o caixa; a identidade da invariante com os dois exemplos numéricos do item 28; sensibilidade fora da janela → "não aplicável"; `window="development"` sem arquivo congelado (ou com hash diferente) falha; cada diagnóstico com um caso feito à mão.
-*   **`test_golden.py`:** `run_model` + `run_backtest(history, cfg, window="calibration")` sobre o CSV congelado comparados com `replay_summary.json` (`{"cycle_starts": [datas], "sell_steps": [{date, mechanism, after}], "calibration": {strategy_equity_end, bnh_equity_end, uniform_equity_end, strategy_max_dd}}`, números com `rel_tol = 1e-9`). Gerado por `python -m bitsignal.backtest.report --golden tests/golden/replay_summary.json`. Sem critérios 2019+. Mudar o JSON exige commit separado.
+*   **`test_golden.py`:** `run_model` + `run_backtest(history, cfg, window="calibration")` sobre o CSV congelado comparados com `replay_summary.json` (`{"cycle_starts": [datas], "sell_steps": [{date, mechanism, after}], "calibration": {strategy_equity_end, bnh_equity_end, uniform_equity_end, strategy_max_dd}}`, números com `rel_tol = 1e-9`). Gerado por `python -m bitsignal.backtest.report --golden tests/golden/replay_summary.json`. Sem critérios da janela de desenvolvimento (2019+). Mudar o JSON exige commit separado.
 
 #### S6 — Congelamento e validação única
 
@@ -1163,13 +1163,13 @@ Não bloqueia a Fase 1. Entra depois que a Fase 1 estiver publicada, com um desi
 
 Itens de redação que não mudam comportamento; resolver ao implementar o item indicado.
 
-*   [ ] **cd-r2-23 (itens 2 e 4):** o `st.warning` fica logo depois de `st.set_page_config`, dentro de `main()`. O teste de `runpy` executa `runpy.run_path("streamlit_app.py")` duas vezes e só então verifica que `main` foi chamado duas vezes.
-*   [ ] **st-r2-14 (itens 31, 33, 37 e Verification Plan):** usar só o nome "janela de desenvolvimento (2019+)".
-*   [ ] **st-r2-15 (itens 19, 23 e 30):** um nome por conceito no código. `ath` (coluna) = `reference_ath_usd` (§6). `cycle_start_date` em todo lugar. `score_status` no `Verdict` = `status` na tabela. `sell_target` no `Verdict` = `ratchet_sell` na tabela. Declarar as equivalências em docstrings.
-*   [ ] **st-r2-25a (item 25):** descrever o caso do reinício como "armado na 2ª semana, efetivado na 4ª (scores 15, 15, 35, 35)".
-*   [ ] **st-r2-25b (item 23):** "colunas devolvidas além das colunas de `weekly`".
-*   [ ] **st-r2-25d (item 3):** o título é "(Modify)", sem "aditivo", porque muda o `cmd_ui`.
-*   [ ] **st-r2-25e:**
+*   [x] **cd-r2-23 (itens 2 e 4):** o `st.warning` fica logo depois de `st.set_page_config`, dentro de `main()`. O teste de `runpy` executa `runpy.run_path("streamlit_app.py")` duas vezes e só então verifica que `main` foi chamado duas vezes.
+*   [x] **st-r2-14 (itens 31, 33, 37 e Verification Plan):** usar só o nome "janela de desenvolvimento (2019+)".
+*   [x] **st-r2-15 (itens 19, 23 e 30):** um nome por conceito no código. `ath` (coluna) = `reference_ath_usd` (§6). `cycle_start_date` em todo lugar. `score_status` no `Verdict` = `status` na tabela. `sell_target` no `Verdict` = `ratchet_sell` na tabela. Declarar as equivalências em docstrings.
+*   [x] **st-r2-25a (item 25):** descrever o caso do reinício como "armado na 2ª semana, efetivado na 4ª (scores 15, 15, 35, 35)".
+*   [x] **st-r2-25b (item 23):** "colunas devolvidas além das colunas de `weekly`".
+*   [x] **st-r2-25d (item 3):** o título é "(Modify)", sem "aditivo", porque muda o `cmd_ui`.
+*   [x] **st-r2-25e:**
     *   o critério "checagens manuais" do S7 cita os itens E2E do Verification Plan;
     *   o status "Approved" no SITEMAP (item 45) só muda quando a Fase 1 for aceita formalmente para implementação.
 
@@ -1182,7 +1182,7 @@ Itens de redação que não mudam comportamento; resolver ao implementar o item 
 *   **Testes técnicos que bloqueiam o congelamento e a publicação** (lista única, citada pelo §7 e pelo S6): `tests/test_weekly.py`, `tests/test_score.py`, `tests/test_detector.py`, `tests/test_detector_golden.py`, `tests/test_cycle.py`, `tests/test_no_lookahead.py`, `tests/test_parity.py`, `tests/test_backtest.py`, `tests/test_golden.py`. São também os testes obrigatórios de avanço entre etapas a partir do S4 (conservação, causalidade, paridade, episódios do detector) e, com `tests/test_cli.py`, do congelamento.
 *   **E2E/Integration**:
     *   `bitsignal fetch-history` cria um CSV com ≥ 5.900 linhas e `check_catalog()` todo verdadeiro.
-    *   `bitsignal backtest --window calibration` roda offline em < 60 s e não imprime critérios 2019+.
+    *   `bitsignal backtest --window calibration` roda offline em < 60 s e não imprime critérios da janela de desenvolvimento (2019+).
     *   `bitsignal evaluate` imprime o veredito da última semana fechada.
     *   `streamlit run streamlit_app.py` e `bitsignal ui` locais: a linha do topo aparece; clicar em qualquer controle não deixa a página em branco; sem chave do Dune o painel funciona.
     *   Depois do deploy, as mesmas verificações no Streamlit Cloud.

@@ -202,7 +202,7 @@ def latest_verdict(result: ReplayResult, now_utc: datetime, cfg: Config) -> Verd
         data_status=ds,
         phase=phase,
         sell_target=float(row["ratchet_sell"]),
-        cycle_start=cycle_start,
+        cycle_start_date=cycle_start,
         buy_pct=buy,
         reason=reason,
         score_status=status,

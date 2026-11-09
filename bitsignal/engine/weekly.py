@@ -46,7 +46,7 @@ def _hash_ribbon_weekly(daily: pd.DataFrame, sundays: pd.DatetimeIndex) -> pd.Se
 def to_weekly(daily_derived: pd.DataFrame, as_of: date, cfg: Config) -> pd.DataFrame:
     """Build the weekly frame from the derived daily frame (see ``derive_daily``)."""
     d = daily_derived
-    sundays = d.index[(d.index.dayofweek == 6) & d["price"].notna().to_numpy()]
+    sundays = d.index[(d.index.day_of_week == 6) & d["price"].notna().to_numpy()]
     sundays = sundays[sundays <= pd.Timestamp(as_of)]
     w = pd.DataFrame(index=sundays)
     w.index.name = "week"
@@ -59,7 +59,7 @@ def to_weekly(daily_derived: pd.DataFrame, as_of: date, cfg: Config) -> pd.DataF
     w["sma200w"] = ind.sma(price, 200)
     w["rsi14w"] = ind.rsi_wilder(price, 14)
     w["high52w"] = price.rolling(det.arming_weeks, min_periods=det.arming_weeks).max()
-    w["ath"] = price.cummax()
+    w["ath"] = price.cummax()  # = reference_ath_usd (design §6): never resets
     w["new_ath"] = (price > w["ath"].shift(1)).fillna(False).astype(bool)
     w["price_to_sma200w"] = ind.price_to_sma(price, w["sma200w"])
     for col in _DAILY_SAMPLED:

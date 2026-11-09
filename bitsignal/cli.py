@@ -160,7 +160,7 @@ def _record_refusal(args, cfg, frozen):
     if frozen is None:
         return "não há arquivo de parâmetros congelados (rode freeze-params primeiro)."
     if frozen.approval is not None:
-        return "o approval já foi gravado; a avaliação 2019+ é gravada uma única vez."
+        return "o approval já foi gravado; a avaliação da janela de desenvolvimento (2019+) é gravada uma única vez."
     if frozen.model_hash != model_hash(cfg):
         return "os parâmetros em uso diferem dos congelados (model_hash)."
     if not _git_committed_clean(repo_path(cfg.backtest.frozen_params)):
@@ -182,7 +182,7 @@ def _write_approval(cfg, frozen, report):
     path = repo_path(cfg.backtest.frozen_params)
     write_frozen_params(path, frozen.model_copy(update={"approval": approval}))
     print("")
-    print(f"[OK] Resultado da avaliação 2019+ gravado em {cfg.backtest.frozen_params}. Commite este arquivo.")
+    print(f"[OK] Resultado da janela de desenvolvimento (2019+) gravado em {cfg.backtest.frozen_params}. Commite este arquivo.")
 
 
 def cmd_evaluate(args):
@@ -205,11 +205,11 @@ def cmd_evaluate(args):
         return
     buy = "—" if v.buy_pct is None else f"{v.buy_pct * 100:.0f}%"
     print(f"Fase: {v.phase.label} · venda acumulada-alvo: {v.sell_target * 100:.0f}% da posição-base "
-          f"(ciclo iniciado em {v.cycle_start}) · compra: {buy} da reserva-base")
+          f"(ciclo iniciado em {v.cycle_start_date}) · compra: {buy} da reserva-base")
     print(f"Motivo: {v.reason}")
     print("Eventos do ciclo:")
     for e in result.events:
-        if e.date >= v.cycle_start:
+        if e.date >= v.cycle_start_date:
             print(f"  {e.date} {e.type.value:<18} {e.mechanism:<9} {e.note}")
     print("Painel experimental: os percentuais são referências do modelo, não ordens.")
 

@@ -27,11 +27,11 @@ def daily(n=70, start="2020-01-01"):
 
 def test_only_sundays_with_price_and_closed():
     d = daily()
-    sundays = d.index[d.index.dayofweek == 6]
+    sundays = d.index[d.index.day_of_week == 6]
     d.loc[sundays[2], "price"] = np.nan  # Sunday without price -> dropped
     as_of = sundays[-1] - pd.Timedelta(days=1)  # last week still open -> dropped
     w = to_weekly(d, as_of.date(), CFG)
-    assert all(ix.dayofweek == 6 for ix in w.index)
+    assert all(ix.day_of_week == 6 for ix in w.index)
     assert sundays[2] not in w.index
     assert sundays[-1] not in w.index
     assert w.index[-1] == sundays[-2]
@@ -39,7 +39,7 @@ def test_only_sundays_with_price_and_closed():
 
 def test_missing_series_keeps_the_week_and_marks_missing_vs_warmup():
     d = daily()
-    sundays = d.index[d.index.dayofweek == 6]
+    sundays = d.index[d.index.day_of_week == 6]
     d.loc[: sundays[1], "puell"] = np.nan  # before first valid -> WARMUP
     d.loc[sundays[4], "puell"] = np.nan  # after -> MISSING, week kept
     w = to_weekly(d, d.index[-1].date(), CFG)
@@ -61,7 +61,7 @@ def test_first_week_is_not_ath_and_new_highs_are():
 
 def _hash_case(cross_day_offset, s30_sunday, s60_sunday):
     d = daily(n=21, start="2020-01-06")  # Monday 2020-01-06 .. Sunday 2020-01-26
-    sundays = d.index[d.index.dayofweek == 6]
+    sundays = d.index[d.index.day_of_week == 6]
     week_mon = sundays[1] - pd.Timedelta(days=6)
     d.loc[week_mon + pd.Timedelta(days=cross_day_offset), "hash_cross_up"] = True
     d.loc[sundays[1], "hash_sma30"] = s30_sunday

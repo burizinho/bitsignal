@@ -82,11 +82,18 @@ class Event:
 
 @dataclass(frozen=True)
 class Verdict:
+    """Verdict of the latest closed week, read from the last row of ``ReplayResult.weeks``.
+
+    One name per concept (st-r2-15): ``sell_target`` is the ``ratchet_sell`` column,
+    ``cycle_start_date`` is the ``cycle_start_date`` column and ``score_status`` is the
+    ``status`` column of that week.
+    """
+
     week: Optional[_date]
     data_status: DataStatus
     phase: Optional[Phase] = None
     sell_target: Optional[float] = None  # = ratchet_sell of the last week
-    cycle_start: Optional[_date] = None  # = cycle_start_date
+    cycle_start_date: Optional[_date] = None  # = cycle_start_date column
     buy_pct: Optional[float] = None  # None shows as "—"
     reason: str = ""
     score_status: Optional[ScoreStatus] = None  # = status column of the last week

@@ -47,9 +47,12 @@ def _as_of(daily: pd.DataFrame) -> date:
 
 def _calendar(df: pd.DataFrame) -> pd.DataFrame:
     """Reindex on the full daily calendar from START to the last price, without filling."""
+    # One index resolution (ns) for every source: pandas 3 parses CSV dates as "us" and API
+    # timestamps as "ns", which would make the dashboard and backtest paths differ.
     df = df.sort_index()
+    df.index = pd.DatetimeIndex(df.index).as_unit("ns")
     last = df["price"].dropna().index[-1]
-    idx = pd.date_range(pd.Timestamp(START), last, freq="D", name="date")
+    idx = pd.date_range(pd.Timestamp(START), last, freq="D", name="date", unit="ns")
     return df.reindex(idx)[COLUMNS].astype("float64")
 
 
