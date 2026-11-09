@@ -66,7 +66,8 @@ def test_top_line_and_experimental_badge():
     assert not at.exception
     assert "Semana fechada em 08/11/2026" in texts(at.markdown)
     assert "Venda acumulada-alvo no ciclo" in texts(at.markdown)
-    assert "Experimental" in texts(at.warning)  # recorded Q1 approval did not pass
+    assert "Experimental" in texts(at.warning)  # v2: no recorded evaluation
+    assert "Janela de calibração" in texts(at.caption)
     assert "não alteram a posição-base" in texts(at.info)  # ACCUMULATE fixed notice
 
 
@@ -95,6 +96,8 @@ def test_without_frozen_file_shows_calibration_and_warning():
     at = run_app(frozen=None)
     assert not at.exception
     assert "Sem parâmetros congelados" in texts(at.warning)
+    assert "Janela de calibração" in texts(at.caption)
+    assert "Janela de desenvolvimento" not in texts(at.caption)  # 2019+ caption only with the 2019+ window
 
 
 def test_approved_badge_when_all_criteria_passed():
@@ -109,3 +112,4 @@ def test_approved_badge_when_all_criteria_passed():
     at = run_app(frozen=frozen)
     assert not at.exception
     assert "Desempenho histórico aprovado" in texts(at.success)
+    assert "Janela de desenvolvimento (2019+)" in texts(at.caption)
