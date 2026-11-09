@@ -113,3 +113,14 @@ def test_approved_badge_when_all_criteria_passed():
     assert not at.exception
     assert "Desempenho histórico aprovado" in texts(at.success)
     assert "Janela de desenvolvimento (2019+)" in texts(at.caption)
+
+
+def test_calculator_turns_percentages_into_amounts():
+    at = run_app()
+    at.number_input(key="calc_base_btc").set_value(1.0)
+    at.number_input(key="calc_reserve_usd").set_value(1000.0)
+    at.run()
+    assert not at.exception
+    md = texts(at.markdown)
+    assert "**0.25000000 BTC**" in md  # 25% of 1 BTC
+    assert "**US$ 20.00**" in md  # 2% of the 1,000 USD reserve (week 08/11/2026, ACCUMULATE)
