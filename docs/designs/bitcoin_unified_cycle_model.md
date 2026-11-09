@@ -3,10 +3,10 @@
 *   **Author:** @burizinho
 *   **Status:** Fase 1 — Approved para implementação (2026-11-08). Fase 2 — Proposed. A aprovação cobre a especificação e o Plano de Implementação da Fase 1; não homologa o código, não valida a estratégia financeira (Q1 não executada) e não autoriza publicar recomendações do modelo novo.
 *   **Date:** 2026-11-08
-*   **Predecessor:** [concepts_brief.md](../../concepts_brief.md)
-*   **Revisão:** revisão EGM de 2026-11-08 incorporada (relatórios `zoom_out_report.md`, `comprehension_report.md`, `critic_report.md`, `critic_report_r2.md`, `intermediate_zoom_out_report.md`, `intermediate_zoom_out_report_r2.md` e `goldfish_review_report.md` na raiz do repositório).
+*   **Predecessor:** [concepts_brief.md](../reviews/bitcoin_unified_cycle_model/archive/concepts_brief.md)
+*   **Revisão:** revisão EGM de 2026-11-08 incorporada (relatórios `zoom_out_report.md`, `comprehension_report.md`, `critic_report.md`, `critic_report_r2.md`, `intermediate_zoom_out_report.md`, `intermediate_zoom_out_report_r2.md` e `goldfish_review_report.md` em `docs/reviews/bitcoin_unified_cycle_model/`).
 
-> **Reconciliação com o brief (2026-11-08):** este documento mantém 11 divergências em relação ao [concepts_brief.md](../../concepts_brief.md): faixas de venda, detector de reversão, compras, rejeição da escada por ATH, reinício, reserva, fonte on-chain, fonte de preço, critério de sucesso, linha do painel e janela 2019+. Todas vêm das decisões Q1, Q2, Q3, Q5, Q5a, Q6, Q7, Q9 e da escolha da fonte de preço. O brief fica como registro histórico das premissas iniciais.
+> **Reconciliação com o brief (2026-11-08):** este documento mantém 11 divergências em relação ao [concepts_brief.md](../reviews/bitcoin_unified_cycle_model/archive/concepts_brief.md): faixas de venda, detector de reversão, compras, rejeição da escada por ATH, reinício, reserva, fonte on-chain, fonte de preço, critério de sucesso, linha do painel e janela 2019+. Todas vêm das decisões Q1, Q2, Q3, Q5, Q5a, Q6, Q7, Q9 e da escolha da fonte de preço. O brief fica como registro histórico das premissas iniciais.
 >
 > **Manter não é validar.** Os componentes estão em três situações:
 >
