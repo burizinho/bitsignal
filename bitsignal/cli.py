@@ -246,8 +246,8 @@ def cmd_backtest(args):
 
 
 def cmd_ui(args):
-    """Launch Streamlit dashboard."""
-    app_path = os.path.join(os.path.dirname(__file__), "ui", "app.py")
+    """Launch Streamlit dashboard through the same entrypoint used by Streamlit Cloud."""
+    app_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "streamlit_app.py")
     subprocess.run([sys.executable, "-m", "streamlit", "run", app_path])
 
 

@@ -18,5 +18,8 @@ for mod_name in list(sys.modules.keys()):
         if mod_file and not mod_file.startswith(root_str):
             del sys.modules[mod_name]
 
-# Execute the main dashboard UI
-import bitsignal.ui.app  # noqa: E402, F401
+# Execute the main dashboard UI. Streamlit re-executes this script on every rerun,
+# but a plain `import` only runs the module body once; calling main() renders every time.
+from bitsignal.ui.app import main  # noqa: E402
+
+main()
