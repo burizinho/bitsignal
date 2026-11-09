@@ -307,7 +307,7 @@ story.append(table([
     ["Aba", "O que tem"],
     ["Semana", "O medidor do score (0 a 100), o medidor da venda acumulada-alvo (até 50%), o estado do detector "
      "de reversão, o bloco <b>“O que mudaria o veredito”</b> (os próximos gatilhos do modelo e a distância de "
-     "hoje até eles) e a <b>calculadora</b>."],
+     "hoje até eles), a <b>calculadora</b> e os botões para <b>exportar para a planilha</b> (CSV)."],
     ["Insumos", "Os seis indicadores da semana, cada um com o valor e se estava disponível. Serve para conferir "
      "de onde veio o score."],
     ["Ciclo e eventos", "O gráfico do preço com as fases coloridas e a lista do que aconteceu no ciclo atual "
@@ -349,7 +349,9 @@ story += steps([
     "<b>Segunda ou terça-feira</b>, abra o painel (os dados de domingo costumam chegar na segunda).",
     "Leia a linha do topo: fase, venda-alvo e compra da semana.",
     "Se quiser quantidades, use a calculadora com os números da sua planilha.",
-    "Decida por conta própria se vai seguir ou não. Se fizer alguma operação, anote na sua planilha.",
+    "Decida por conta própria se vai seguir ou não. Se fizer alguma operação, anote na sua planilha. Para "
+    "levar o veredito para a planilha, use “Veredito desta semana (CSV)” no fim da aba Semana: o formato "
+    "padrão abre direto no Excel e no Planilhas Google em português.",
     "Nas semanas de <b>MANTER</b> (a maioria), não há nada a fazer.",
 ])
 story.append(P("Paciência faz parte: um ciclo do bitcoin leva anos, e o modelo foi feito para mudar de ideia "
