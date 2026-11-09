@@ -393,6 +393,35 @@ def _write_approval(cfg, frozen, report):
     print(f"[OK] Resultado da avaliação 2019+ gravado em {cfg.backtest.frozen_params}. Commite este arquivo.")
 
 
+def cmd_evaluate(args):
+    """S7: print the verdict of the latest closed week from live CoinMetrics data."""
+    from datetime import datetime, timezone
+
+    from bitsignal.config import load_config
+    from bitsignal.data.coinmetrics import fetch_coinmetrics
+    from bitsignal.data.history import from_frame
+    from bitsignal.engine.cycle import latest_verdict
+    from bitsignal.engine.pipeline import run_model
+
+    cfg = load_config()
+    history = from_frame(fetch_coinmetrics(), source="coinmetrics_live")
+    result = run_model(history, cfg)
+    v = latest_verdict(result, datetime.now(timezone.utc), cfg)
+    print(f"Semana {v.week} · dados: {v.data_status.label}")
+    if v.phase is None:
+        print(f"Sem veredito: {v.reason}")
+        return
+    buy = "—" if v.buy_pct is None else f"{v.buy_pct * 100:.0f}%"
+    print(f"Fase: {v.phase.label} · venda acumulada-alvo: {v.sell_target * 100:.0f}% da posição-base "
+          f"(ciclo iniciado em {v.cycle_start}) · compra: {buy} da reserva-base")
+    print(f"Motivo: {v.reason}")
+    print("Eventos do ciclo:")
+    for e in result.events:
+        if e.date >= v.cycle_start:
+            print(f"  {e.date} {e.type.value:<18} {e.mechanism:<9} {e.note}")
+    print("Painel experimental: os percentuais são referências do modelo, não ordens.")
+
+
 def cmd_ui(args):
     """Launch Streamlit dashboard through the same entrypoint used by Streamlit Cloud."""
     app_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "streamlit_app.py")
@@ -592,6 +621,9 @@ def main():
     # ui
     subparsers.add_parser("ui", help="Launch Streamlit dashboard")
 
+    # evaluate (S7)
+    subparsers.add_parser("evaluate", help="Print the model verdict for the latest closed week (live data)")
+
     # fetch-history (S3)
     p_fh = subparsers.add_parser("fetch-history", help="Download CoinMetrics history into the frozen CSV")
     p_fh.add_argument("--out", default=None, help="CSV path (default: data.csv_path from config)")
@@ -634,6 +666,8 @@ def main():
         cmd_ui(args)
     elif args.command == "fetch-history":
         cmd_fetch_history(args)
+    elif args.command == "evaluate":
+        cmd_evaluate(args)
     elif args.command == "freeze-params":
         cmd_freeze_params(args)
     elif args.command == "strategy-status":

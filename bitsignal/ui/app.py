@@ -1,10 +1,11 @@
-"""Interactive local Streamlit dashboard for BitSignal."""
+"""BitSignal read-only dashboard (design §8, plan item 37).
 
-import argparse
-from datetime import datetime, timezone
+Shows the model verdict for the latest closed week, in percentages only. It never executes
+orders, never stores anything on disk and never shows recommendations built from stale data.
+"""
+
 import os
 from pathlib import Path
-import sqlite3
 import sys
 
 # Ensure repository root is in sys.path BEFORE any bitsignal imports (needed for Streamlit Cloud deployment)
@@ -22,514 +23,311 @@ for mod_name in list(sys.modules.keys()):
         if mod_file and not mod_file.startswith(root_str):
             del sys.modules[mod_name]
 
+from datetime import datetime, timezone  # noqa: E402
+import time  # noqa: E402
+
 import pandas as pd  # noqa: E402
-import plotly.graph_objects as go  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from bitsignal.storage.db import (  # noqa: E402
-    get_executed_stages,
-    get_portfolio_summary,
-    get_portfolio_transactions,
-    record_portfolio_transaction,
+from bitsignal.backtest.engine import run_backtest  # noqa: E402
+from bitsignal.backtest.report import HEADER as BACKTEST_HEADER, to_frames  # noqa: E402
+from bitsignal.config import (  # noqa: E402
+    DEFAULT_CONFIG_PATH,
+    ConfigError,
+    INPUT_KEYS,
+    load_config,
+    load_frozen_params,
+    model_hash,
+    validate_for_panel,
 )
-from bitsignal.strategy.models import PortfolioTransaction, StageType, TransactionType  # noqa: E402
-from bitsignal.strategy.tax_br import compute_darf_for_month, get_monthly_accumulated_alienation  # noqa: E402
-from bitsignal.ui.cycle_gauge import (  # noqa: E402
-    get_all_stages_table,
-    get_cycle_stage_info,
-    render_cycle_regime_gauge,
-    render_operational_intensity_gauge,
+from bitsignal.data import dune as dune_mod  # noqa: E402
+from bitsignal.data import spot as spot_mod  # noqa: E402
+from bitsignal.data.coinmetrics import DataUnavailable, fetch_coinmetrics  # noqa: E402
+from bitsignal.data.history import derive_daily, from_frame, load_frozen_history  # noqa: E402
+from bitsignal.engine.cycle import data_status, latest_verdict  # noqa: E402
+from bitsignal.engine.pipeline import run_model  # noqa: E402
+from bitsignal.models import DataStatus, InputState, Phase, ScoreStatus  # noqa: E402
+from bitsignal.ui import charts  # noqa: E402
+
+# --------------------------------------------------------------------------------------
+# Injection points (module level; patched by tests/test_app_smoke.py)
+# --------------------------------------------------------------------------------------
+
+CONFIG_PATH = DEFAULT_CONFIG_PATH
+_BOOT = load_config(CONFIG_PATH)
+
+INPUT_LABELS = {
+    "mvrv_z": "MVRV Z",
+    "price_to_sma200w": "Preço / SMA200w",
+    "puell": "Puell",
+    "picycle": "Pi Cycle",
+    "rsi14w": "RSI(14) semanal",
+    "hash_ribbon": "Hash Ribbon",
+}
+INPUT_VALUE_COL = {"picycle": "picycle_spread"}
+
+ACCUMULATE_NOTICE = (
+    "As compras desta fase não alteram a posição-base do ciclo atual. "
+    "A meta de venda não é uma ordem automática nem considera operações já executadas."
 )
-
-DEFAULT_DB_PATH = str(ROOT_DIR / "data" / "bitsignal.db")
-DB_PATH = os.getenv("DATABASE_PATH", DEFAULT_DB_PATH)
+RECONSTRUCTION_NOTICE = "Dados históricos recuperados ou revisados podem alterar esta reconstrução, inclusive para baixo."
 
 
-def load_data():
-    if not os.path.exists(DB_PATH):
-        return None, None, None
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        df_scores = pd.read_sql_query("SELECT * FROM daily_scores ORDER BY date ASC;", conn)
-        df_metrics = pd.read_sql_query("SELECT * FROM daily_metrics ORDER BY date ASC;", conn)
-        df_alerts = pd.read_sql_query("SELECT * FROM alert_dispatches ORDER BY date DESC LIMIT 20;", conn)
-        return df_scores, df_metrics, df_alerts
-    except Exception:
-        return None, None, None
-    finally:
-        conn.close()
+def get_config():
+    return load_config(CONFIG_PATH)
 
 
-AUTO_REFRESH_SECONDS = int(os.getenv("AUTO_REFRESH_SECONDS", 3600))  # 1 hour default
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def is_data_stale(df_scores) -> bool:
-    """Return True if no data exists or the newest score is older than AUTO_REFRESH_SECONDS (1 hour)."""
-    if df_scores is None or df_scores.empty:
-        return True
-    try:
-        latest = df_scores.iloc[-1]
-        ts_str = latest.get("created_at")
-        if not ts_str or pd.isna(ts_str):
-            return True
-        ts = pd.to_datetime(ts_str, utc=True)
-        now = datetime.now(timezone.utc)
-        return (now - ts).total_seconds() >= AUTO_REFRESH_SECONDS
-    except Exception:
-        return False
+@st.cache_data(ttl=_BOOT.ui.cache_ttl_coinmetrics, show_spinner="Buscando o histórico da CoinMetrics…")
+def load_history():
+    return from_frame(fetch_coinmetrics(), source="coinmetrics_live", fetched_at=now_utc())
 
 
-def ensure_data_available():
-    """Ensure data is loaded; automatically updates if data is missing or older than 1 hour."""
-    df_scores, df_metrics, df_alerts = load_data()
-    if is_data_stale(df_scores):
-        is_empty = df_scores is None or df_scores.empty
-        msg = "Inicializando dados de mercado ao vivo..." if is_empty else "Atualizando indicadores de mercado (dados com mais de 1h)..."
-        with st.spinner(msg):
-            try:
-                from bitsignal.cli import cmd_run_daily
-                cmd_run_daily(argparse.Namespace(db_path=DB_PATH, dry_run=True))
-                fresh_scores, fresh_metrics, fresh_alerts = load_data()
-                if fresh_scores is not None and not fresh_scores.empty:
-                    df_scores, df_metrics, df_alerts = fresh_scores, fresh_metrics, fresh_alerts
-            except Exception as exc:
-                if is_empty:
-                    st.error(f"Erro ao inicializar dados na nuvem: {exc}")
-                else:
-                    st.warning(f"Não foi possível buscar os dados mais recentes agora ({exc}). Exibindo último registro em cache.")
-    return df_scores, df_metrics, df_alerts
+@st.cache_data(ttl=_BOOT.ui.cache_ttl_coinmetrics, show_spinner=False)
+def cached_model(key: str, _history, _cfg):
+    return run_model(_history, _cfg)
 
 
-OLD_PANEL_WARNING = "Em revisão: as ordens desta tela vêm do modelo antigo e não devem ser seguidas."
+@st.cache_data(ttl=_BOOT.ui.cache_ttl_spot, show_spinner=False)
+def cached_spot():
+    return spot_mod.fetch_spot_usd()
+
+
+@st.cache_data(show_spinner="Calculando o backtest…")
+def cached_backtest(key: str, window: str, _cfg, _frozen):
+    history = load_frozen_history(_cfg.data.csv_path)
+    return run_backtest(history, _cfg, window=window, frozen=_frozen, sensitivities=False)
+
+
+# --------------------------------------------------------------------------------------
+# Rendering helpers
+# --------------------------------------------------------------------------------------
+
+
+def _pct(x) -> str:
+    return "—" if x is None or pd.isna(x) else f"{x * 100:.0f}%"
+
+
+def _d(x) -> str:
+    return pd.Timestamp(x).strftime("%d/%m/%Y")
+
+
+def top_line(verdict, cfg) -> str:
+    buy = _pct(verdict.buy_pct) if verdict.buy_pct is not None else "—"
+    return (
+        f"Semana fechada em {_d(verdict.week)} · **{verdict.phase.label}** · "
+        f"Venda acumulada-alvo no ciclo: **{_pct(verdict.sell_target)}** da posição-base "
+        f"(ciclo iniciado em {_d(verdict.cycle_start)}) · "
+        f"Compra programada nesta semana: **{buy}** da reserva-base · Motivo: {verdict.reason}"
+    )
+
+
+def render_spot():
+    spot = cached_spot()
+    if spot is None:
+        st.caption("Preço agora (yfinance, somente exibição): indisponível.")
+    else:
+        price, ts = spot
+        st.caption(f"Preço agora (yfinance, somente exibição): US$ {price:,.0f} às {ts:%H:%M} UTC")
+
+
+def render_unavailable(cfg, reason: str, context_history=None):
+    """Screen without verdict (Q6): no phase, no sell target, no buy."""
+    last_try = st.session_state.get("last_attempt")
+    when = f" (última tentativa {last_try:%d/%m %H:%M} UTC)" if last_try else ""
+    st.error(f"{reason}{when}. Sem veredito nesta carga.")
+    render_spot()
+    cooldown = cfg.ui.retry_cooldown_s
+    last_retry = st.session_state.get("last_retry_ts", 0.0)
+    if st.button("Tentar de novo"):
+        if time.time() - last_retry >= cooldown:
+            st.session_state["last_retry_ts"] = time.time()
+            load_history.clear()
+            st.rerun()
+        else:
+            st.warning(f"Aguarde {cooldown} s entre tentativas.")
+    if context_history is not None:
+        st.info(
+            f"Histórico em memória só para consulta — último dado {_d(context_history.as_of)}, desatualizado. "
+            "Nenhuma fase, meta de venda ou compra é calculada a partir dele."
+        )
+        st.line_chart(context_history.daily["price"].dropna().iloc[-730:], height=260)
+
+
+def render_inputs(result, history, cfg):
+    last = result.weeks.iloc[-1]
+    rows = []
+    for name in INPUT_KEYS:
+        col = INPUT_VALUE_COL.get(name, name)
+        state = InputState(last[f"state_{name}"])
+        value = last[col]
+        rows.append(
+            {
+                "insumo": INPUT_LABELS[name],
+                "valor": value if isinstance(value, str) else ("—" if pd.isna(value) else f"{float(value):.3f}"),
+                "estado": state.label,
+                "fonte": f"CoinMetrics ({'CSV congelado' if history.source == 'coinmetrics_frozen' else 'ao vivo'})",
+                "data": _d(result.weeks.index[-1]),
+            }
+        )
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+
+def render_detector(result):
+    last = result.weeks.iloc[-1]
+    level = int(last["level"])
+    if level > 0:
+        st.write(f"Detector de reversão: **episódio em N{level}**")
+    elif bool(last["armed"]):
+        st.write("Detector de reversão: **armado** (ATH nas últimas 52 semanas), sem episódio")
+    else:
+        st.write("Detector de reversão: **desarmado**")
+
+
+def render_cycle(result, verdict, cfg):
+    cycle_start = pd.Timestamp(verdict.cycle_start)
+    weeks = result.weeks.loc[cycle_start:]
+    st.plotly_chart(charts.price_phases_chart(result.weeks.iloc[-260:], result.events), width="stretch")
+    st.caption(f"Recalculado em {now_utc():%d/%m/%Y %H:%M} UTC. {RECONSTRUCTION_NOTICE}")
+    ev = [e for e in result.events if pd.Timestamp(e.date) >= cycle_start]
+    if ev:
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"data": _d(e.date), "evento": e.type.value, "mecanismo": e.mechanism,
+                     "limiar": e.threshold, "antes": e.before, "depois": e.after, "nota": e.note}
+                    for e in ev
+                ]
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+    st.caption(f"Semanas no ciclo atual: {len(weeks)}.")
+
+
+def render_dune(history, cfg):
+    key, qid = os.getenv("DUNE_API_KEY"), os.getenv("DUNE_QUERY_ID")
+    if not key or not qid:
+        return
+    row = dune_mod.fetch_dune_latest(key, qid)
+    if row is None:
+        st.caption("Conferência Dune: indisponível.")
+        return
+    divs = dune_mod.compare_with(derive_daily(history, get_config()), row)
+    if divs:
+        st.warning("Conferência Dune: divergências — " + "; ".join(f"{d.metric} {d.delta:+.2f} em {_d(d.date)}" for d in divs))
+    else:
+        st.caption(f"Conferência Dune ({_d(row['date'])}): sem divergência acima dos limites.")
+
+
+def render_backtest(cfg):
+    frozen = load_frozen_params(cfg.backtest.frozen_params)
+    current = model_hash(cfg)
+    if frozen is not None and frozen.model_hash == current:
+        rep = cached_backtest(current, "development", cfg, frozen)
+        a = frozen.approval
+        if a is not None and all(a.passed.model_dump().values()):
+            st.success("Desempenho histórico aprovado (critérios da Q1, gravados no congelamento). Sem promessa de rentabilidade.")
+        else:
+            st.warning("Experimental: os critérios financeiros da Q1 não foram todos atingidos na avaliação gravada.")
+        if a is not None:
+            st.dataframe(
+                pd.DataFrame({"valor gravado": a.values.model_dump(), "aprovado": a.passed.model_dump()}),
+                width="stretch",
+            )
+    else:
+        msg = "sem parâmetros congelados" if frozen is None else "parâmetros diferentes dos congelados"
+        st.warning(f"{msg.capitalize()}: status aprovado não se aplica. Mostrando só a janela de calibração.")
+        rep = cached_backtest(current, "calibration", cfg, None)
+    st.caption(BACKTEST_HEADER)
+    frames = to_frames(rep)
+    st.plotly_chart(charts.equity_chart(frames), width="stretch")
+    st.dataframe(frames["diagnostics"], hide_index=True, width="stretch")
+
+
+def render_glossary():
+    st.markdown(
+        """
+- **Score de valuation (0–100):** soma ponderada de MVRV Z, preço/SMA200w, Puell, Pi Cycle, RSI semanal e Hash Ribbon.
+- **Posição-base:** BTC da carteira no início do ciclo; base das metas de venda.
+- **Venda acumulada-alvo:** quanto da posição-base o modelo recomenda ter vendido no ciclo (catraca; teto de 50%).
+- **Reserva-base:** caixa em USD destinado a compras, fixado no início da campanha.
+- **Fases:** ACUMULAR (reinício armado, compras pelo score), DISTRIBUIR (catraca > 0), MANTER.
+- **Detector de reversão:** independente do score; níveis N1 10%, N2 25%, N3 50%.
+"""
+    )
+
+
+# --------------------------------------------------------------------------------------
+# Main
+# --------------------------------------------------------------------------------------
 
 
 def main():
-    """Renderiza o painel. Chamado a cada execução do Streamlit (inclusive nos reruns)."""
-    st.set_page_config(
-        page_title="BitSignal - Bitcoin Macro Cycle Sentinel",
-        page_icon="⚡",
-        layout="wide",
+    """Render the dashboard. Called on every Streamlit run (including reruns)."""
+    st.set_page_config(page_title="BitSignal — Modelo de Ciclo", page_icon="⚡", layout="wide")
+    st.title("⚡ BitSignal — Modelo de Ciclo Unificado")
+    st.caption("Painel experimental · só leitura · não executa ordens · os percentuais são referências do modelo, não ordens.")
+
+    cfg = get_config()
+    try:
+        validate_for_panel(cfg)
+    except ConfigError as exc:
+        st.error(f"Config inválido para o painel ({exc.path}): {exc.message}")
+        return
+
+    now = now_utc()
+    history = None
+    try:
+        history = load_history()
+        st.session_state["last_good_history"] = history
+    except Exception as exc:  # DataUnavailable, HTTP errors…
+        st.session_state["last_attempt"] = now
+        reason = "Dados da CoinMetrics indisponíveis" if isinstance(exc, DataUnavailable) else f"Falha ao buscar dados ({type(exc).__name__})"
+        render_unavailable(cfg, reason, st.session_state.get("last_good_history"))
+        return
+
+    result = cached_model(f"{history.as_of}:{history.fetched_at}:{model_hash(cfg)}", history, cfg)
+    if data_status(result, now, cfg) != DataStatus.OK:
+        st.session_state["last_attempt"] = now
+        render_unavailable(cfg, f"Dados desatualizados (última semana completa {_d(result.weeks.index[-1])})", history)
+        return
+
+    verdict = latest_verdict(result, now, cfg)
+    if verdict.phase == Phase.ACCUMULATE:
+        st.success(f"Compra programada nesta semana: **{_pct(verdict.buy_pct) if verdict.buy_pct is not None else '—'}** da reserva-base (sujeita ao caixa disponível)")
+        st.info(ACCUMULATE_NOTICE)
+    st.markdown(top_line(verdict, cfg))
+    render_spot()
+
+    tab_week, tab_inputs, tab_cycle, tab_bt, tab_gloss = st.tabs(
+        ["Semana", "Insumos", "Ciclo e eventos", "Backtest", "Glossário"]
     )
-    st.warning(OLD_PANEL_WARNING)
-
-    df_scores, df_metrics, df_alerts = ensure_data_available()
-
-    st.title("⚡ BitSignal: Bitcoin Macro Cycle Sentinel")
-    st.caption("Autonomous Quantitative Macro Cycle & Cold Storage Divestment Monitor")
-
-    # Sidebar controls
-    with st.sidebar:
-        st.header("Controles")
-        if df_scores is not None and not df_scores.empty:
-            last_updated = df_scores.iloc[-1].get("created_at", "N/A")
-            st.caption(f"🕒 **Última atualização:**\n`{last_updated} UTC`")
-            st.caption("🔄 *Auto-refresh a cada 1 hora ao abrir.*")
-        if st.button("🔄 Atualizar Dados Agora"):
-            with st.spinner("Consultando APIs on-chain e de mercado..."):
-                try:
-                    from bitsignal.cli import cmd_run_daily
-                    cmd_run_daily(argparse.Namespace(db_path=DB_PATH, dry_run=True))
-                    st.success("Dados atualizados com sucesso!")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Erro ao atualizar dados: {exc}")
-
-    if df_scores is None or df_scores.empty:
-        st.warning("No data found in database. Please run `bitsignal run-daily` or `bitsignal db-init` first.")
-        st.stop()
-
-    latest_score = df_scores.iloc[-1]
-    latest_metric = df_metrics.iloc[-1] if df_metrics is not None and not df_metrics.empty else None
-
-    tab_macro, tab_plan_gauge, tab_strategy = st.tabs(["🌐 Sentinela Macro Global", "🎯 Termômetro de Ciclo (Plano Nacional)", "🇧🇷 Carteira & Execução Fiscal"])
-
-    with tab_macro:
-        col1, col2, col3, col4 = st.columns(4)
-        score_val = float(latest_score["composite_score"])
-        status_val = latest_score["system_status"]
-        hysteresis_val = latest_score["hysteresis_state"]
-        btc_price = float(latest_metric["btc_price"]) if latest_metric is not None else 0.0
-
-        col1.metric("Composite Cycle Score", f"{score_val:.1f} / 100")
-        col2.metric("Market Price (BTC)", f"${btc_price:,.2f}")
-        col3.metric("System Health", status_val)
-        col4.metric("Hysteresis Regime", hysteresis_val)
-
-        st.markdown("---")
-
-        # Layout: Gauge on Left, Waterfall on Right
-        c_left, c_right = st.columns([1, 1])
-
-        with c_left:
-            st.subheader("Macro Cycle Regime Gauge")
-            fig_gauge = go.Figure(
-                go.Indicator(
-                    mode="gauge+number",
-                    value=score_val,
-                    domain={"x": [0, 1], "y": [0, 1]},
-                    gauge={
-                        "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "white"},
-                        "bar": {"color": "black", "thickness": 0.25},
-                        "steps": [
-                            {"range": [0, 20], "color": "#00CC96"},  # Green Bottom
-                            {"range": [20, 80], "color": "#636EFA"},  # Neutral
-                            {"range": [80, 85], "color": "#FFA15A"},  # Tier 1 Top
-                            {"range": [85, 90], "color": "#FF6692"},  # Tier 2 Top
-                            {"range": [90, 100], "color": "#EF553B"},  # Tier 3 Mania
-                        ],
-                        "threshold": {
-                            "line": {"color": "red", "width": 4},
-                            "thickness": 0.75,
-                            "value": score_val,
-                        },
-                    },
-                )
-            )
-            fig_gauge.update_layout(height=350, margin=dict(l=20, r=20, t=30, b=20))
-            st.plotly_chart(fig_gauge, use_container_width=True)
-
-        with c_right:
-            st.subheader("Indicator Point Attribution")
-            indicators = ["MVRV Z (25%)", "200w SMA (20%)", "Puell (20%)", "Pi Cycle (15%)", "Weekly RSI (10%)", "Hash Ribbon (10%)"]
-            points = [
-                float(latest_score["mvrv_score"]) * 0.25,
-                float(latest_score["sma200w_score"]) * 0.20,
-                float(latest_score["puell_score"]) * 0.20,
-                float(latest_score["picycle_score"]) * 0.15,
-                float(latest_score["rsi_score"]) * 0.10,
-                float(latest_score["hashribbon_score"]) * 0.10,
-            ]
-            fig_waterfall = go.Figure(
-                go.Bar(
-                    x=indicators,
-                    y=points,
-                    text=[f"{p:.1f} pts" for p in points],
-                    textposition="auto",
-                    marker_color=["#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A", "#19D3F3"],
-                )
-            )
-            fig_waterfall.update_layout(height=350, margin=dict(l=20, r=20, t=30, b=20), yaxis=dict(title="Points Contributed"))
-            st.plotly_chart(fig_waterfall, use_container_width=True)
-
-        # Historical Time-Series
-        st.subheader("Historical Trajectory & Cycle Bands")
-        fig_history = go.Figure()
-
-        fig_history.add_trace(
-            go.Scatter(
-                x=df_scores["date"],
-                y=df_scores["composite_score"],
-                mode="lines",
-                name="Composite Score",
-                line=dict(color="#636EFA", width=2.5),
-            )
+    last = result.weeks.iloc[-1]
+    with tab_week:
+        c1, c2 = st.columns(2)
+        score_value = last["score"] if last["status"] == ScoreStatus.OK.value else last["score_min"]
+        c1.plotly_chart(
+            charts.score_gauge(score_value, cfg.sell_ladder, cfg.cycle.arm_score), width="stretch"
         )
-        fig_history.add_hline(y=80, line_dash="dash", line_color="red", annotation_text="Tier 1 Top (80)")
-        fig_history.add_hline(y=20, line_dash="dash", line_color="green", annotation_text="Capitulation Bottom (20)")
-        fig_history.update_layout(
-            height=400,
-            xaxis_title="Date",
-            yaxis_title="Score (0-100)",
-            yaxis=dict(range=[0, 100]),
-            margin=dict(l=20, r=20, t=30, b=20),
-        )
-        st.plotly_chart(fig_history, use_container_width=True)
+        status = ScoreStatus(last["status"])
+        if status != ScoreStatus.OK:
+            c1.caption(f"Score em estado **{status.label}** (mín {last['score_min']:.1f} · máx {last['score_max']:.1f})"
+                       if status == ScoreStatus.INTERVAL else "Score **indisponível** nesta semana.")
+        c2.plotly_chart(charts.sell_target_gauge(verdict.sell_target, cfg.cap.cap), width="stretch")
+        c2.caption(f"Venda acumulada-alvo: {_pct(verdict.sell_target)} de no máximo {_pct(cfg.cap.cap)} da posição-base.")
+        render_detector(result)
+    with tab_inputs:
+        render_inputs(result, history, cfg)
+        render_dune(history, cfg)
+    with tab_cycle:
+        render_cycle(result, verdict, cfg)
+    with tab_bt:
+        render_backtest(cfg)
+    with tab_gloss:
+        render_glossary()
+    st.caption("Dados: CoinMetrics Community (CC BY-NC 4.0). Uso não comercial.")
 
-        # Alert Audit Log
-        if df_alerts is not None and not df_alerts.empty:
-            st.subheader("Recent Alert Dispatch History")
-            st.dataframe(df_alerts[["date", "alert_type", "composite_score", "delivered_telegram", "created_at"]], use_container_width=True)
-
-    with tab_plan_gauge:
-        st.header("🎯 Termômetro de Ciclo — Degraus de Entrada e Saída Nacional")
-        st.caption("Estratégia baseada em preço relativo à máxima do ciclo (ATH = US$ 126 mil) com gestão de intensidade percentual e regras fiscais brasileiras.")
-
-        # Configuration Expander
-        with st.expander("⚙️ Parâmetros do Ciclo & Carteira", expanded=False):
-            p_col1, p_col2, p_col3, p_col4 = st.columns(4)
-            cfg_ath_usd = p_col1.number_input("Máxima de Referência (ATH US$)", value=126000.0, step=1000.0, format="%.2f")
-            cfg_reserve_brl = p_col2.number_input("Reserva Total de Compra (R$)", value=100000.0, step=5000.0, format="%.2f")
-            cfg_pos_btc = p_col3.number_input("Posição Base de Saída (BTC)", value=0.50, step=0.05, format="%.4f")
-            cfg_usd_brl = p_col4.number_input("Câmbio USD/BRL Estimado", value=5.80, step=0.05, format="%.2f")
-
-        spot_usd = btc_price if btc_price > 0 else 95000.0
-        spot_brl = spot_usd * cfg_usd_brl
-        stage_info = get_cycle_stage_info(
-            price_usd=spot_usd,
-            cycle_ath_usd=cfg_ath_usd,
-            usd_brl_rate=cfg_usd_brl,
-            total_reserve_brl=cfg_reserve_brl,
-            total_position_btc=cfg_pos_btc,
-        )
-
-        # Top KPI summary cards
-        k_col1, k_col2, k_col3, k_col4 = st.columns(4)
-        k_col1.metric("Preço BTC (Spot USD)", f"${spot_usd:,.2f}", f"R$ {spot_brl:,.2f}")
-        mult_str = f"{stage_info['ratio']:.2f}x"
-        drawdown_str = f"{stage_info['drawdown_pct']:+.1f}%"
-        k_col2.metric("Múltiplo sobre o Topo (ATH)", mult_str, drawdown_str)
-        k_col3.metric("Fase do Ciclo", stage_info["phase"])
-        k_col4.metric("Degrau Vigente", stage_info["stage_id"])
-
-        st.markdown("---")
-
-        # Gauges: Regime on Left, Intensity on Right
-        g_left, g_right = st.columns([1.2, 1])
-
-        with g_left:
-            fig_regime = render_cycle_regime_gauge(current_price_usd=spot_usd, cycle_ath_usd=cfg_ath_usd)
-            st.plotly_chart(fig_regime, use_container_width=True)
-
-        with g_right:
-            fig_intensity = render_operational_intensity_gauge(stage_info)
-            st.plotly_chart(fig_intensity, use_container_width=True)
-
-        # Actionable Operational Callout Box
-        if stage_info["action"] == "COMPRA":
-            st.success(
-                f"### 🟢 RECOMENDAÇÃO OPERACIONAL: {stage_info['stage_name']}\n\n"
-                f"• **Intensidade Sugerida:** `{stage_info['intensity_pct']:.0f}%` ({stage_info['allocation_base']})\n"
-                f"• **Volume a Aportar:** `R$ {stage_info['volume_brl']:,.2f}` (~ `{stage_info['volume_btc']:.8f} BTC`)\n"
-                f"• **Orientação de Execução:** {stage_info['description']}\n"
-                f"• **Engenharia Fiscal:** {stage_info['tax_note']}"
-            )
-        elif stage_info["action"] == "VENDA":
-            st.warning(
-                f"### 🔴 RECOMENDAÇÃO OPERACIONAL: {stage_info['stage_name']}\n\n"
-                f"• **Intensidade Sugerida:** `{stage_info['intensity_pct']:.0f}%` ({stage_info['allocation_base']})\n"
-                f"• **Desinvestimento:** `{stage_info['volume_btc']:.8f} BTC` (~ `R$ {stage_info['volume_brl']:,.2f}`)\n"
-                f"• **Orientação de Execução:** {stage_info['description']}\n"
-                f"• **Engenharia Fiscal:** {stage_info['tax_note']}"
-            )
-        else:
-            st.info(
-                f"### 🟣 SITUAÇÃO ATUAL: {stage_info['stage_name']}\n\n"
-                f"• **Intensidade Sugerida:** `0%` (Sem compras adicionais e sem desinvestimento)\n"
-                f"• **Orientação:** {stage_info['description']}\n"
-                f"• **Estratégia:** Aguardar fechamento semanal dominical (21h BRT). Os stops móveis protegem contra reversões."
-            )
-
-        st.markdown("---")
-
-        # Interactive Scenario Simulator
-        st.subheader("🧪 Simulador Interativo de Cenários de Preço")
-        st.caption("Arraste o controle para simular como a estratégia se comporta em diferentes patamares de cotação.")
-
-        sim_price = st.slider(
-            "Cotação Simulada do Bitcoin (US$):",
-            min_value=30000.0,
-            max_value=350000.0,
-            value=float(spot_usd),
-            step=1000.0,
-            format="$%.0f",
-        )
-
-        sim_info = get_cycle_stage_info(
-            price_usd=sim_price,
-            cycle_ath_usd=cfg_ath_usd,
-            usd_brl_rate=cfg_usd_brl,
-            total_reserve_brl=cfg_reserve_brl,
-            total_position_btc=cfg_pos_btc,
-        )
-
-        sim_col1, sim_col2, sim_col3 = st.columns(3)
-        sim_col1.metric("Degrau no Cenário", sim_info["stage_name"])
-        sim_col2.metric("Intensidade da Operação", f"{sim_info['intensity_pct']:.0f}% ({sim_info['action']})")
-        vol_text = f"R$ {sim_info['volume_brl']:,.2f}" if sim_info["action"] == "COMPRA" else f"{sim_info['volume_btc']:.4f} BTC (R$ {sim_info['volume_brl']:,.2f})"
-        sim_col3.metric("Volume Sugerido", vol_text if sim_info["action"] != "NENHUMA (HODL)" else "0")
-
-        st.markdown("---")
-
-        # Full Stages Table
-        st.subheader("📋 Tabela Estratégica Completa — Faixas, Degraus e Intensidades")
-        df_all_stages = get_all_stages_table(
-            cycle_ath_usd=cfg_ath_usd,
-            usd_brl_rate=cfg_usd_brl,
-            current_price_usd=spot_usd,
-            total_reserve_brl=cfg_reserve_brl,
-            total_position_btc=cfg_pos_btc,
-        )
-        st.dataframe(df_all_stages, use_container_width=True)
-
-        # Trailing stops rules box
-        st.markdown("---")
-        st.subheader("🛡️ Trailing Stops Dominicais (Proteção Dinâmica de Saída)")
-        ts_col1, ts_col2 = st.columns(2)
-        with ts_col1:
-            st.markdown(
-                "**Stop 1 (Fechamento Semanal < 21w EMA):**\n\n"
-                "• **Gatilho:** Fechamento dominical às 21h00 BRT abaixo da Média Móvel Exponencial de 21 semanas.\n"
-                "• **Intensidade:** Venda imediata de **50% do saldo restante**.\n"
-                "• **Objetivo:** Proteger ganhos antes da confirmação de bear market prolongado."
-            )
-        with ts_col2:
-            st.markdown(
-                "**Stop 2 (Fechamento Semanal < 50w SMA):**\n\n"
-                "• **Gatilho:** Fechamento dominical às 21h00 BRT abaixo da Média Móvel Simples de 50 semanas.\n"
-                "• **Intensidade:** Venda imediata de **100% do saldo restante** (exceto os 10% de Moonbag).\n"
-                "• **Objetivo:** Encerrar a fase de saída do ciclo e migrar liquidez para renda fixa (CDI) até a próxima fase de entrada."
-            )
-
-
-    with tab_strategy:
-        st.header("🇧🇷 Estratégia de Execução Nacional & Engenharia Fiscal")
-        st.caption("Controle patrimonial, Custo Médio Ponderado (CMP) e conformidade tributária RFB (Lei 8.981/95 e IN 1.888).")
-
-        summary = get_portfolio_summary(DB_PATH)
-        executed_stages = set(get_executed_stages(DB_PATH))
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m")
-        monthly_alienation = get_monthly_accumulated_alienation(month_year=now_str, db_path=DB_PATH)
-        tax_report = compute_darf_for_month(month_year=now_str, db_path=DB_PATH)
-
-        # Metric KPI Cards
-        s_col1, s_col2, s_col3, s_col4 = st.columns(4)
-        s_col1.metric("Saldo em Custódia", f"{summary.current_btc_balance:.8f} BTC")
-        s_col2.metric("Custo Médio Ponderado", f"R$ {summary.current_cmp_brl:,.2f}")
-        s_col3.metric("Total Aportado", f"R$ {summary.total_invested_brl:,.2f}")
-        s_col4.metric("Total Retirado", f"R$ {summary.total_withdrawn_brl:,.2f}")
-
-        st.markdown("---")
-
-        # Fiscal Gauge & DARF Status
-        fg_col1, fg_col2 = st.columns([1, 1])
-
-        with fg_col1:
-            st.subheader("Termômetro de Isenção Mensal (R$ 35.000 / mês)")
-            is_exempt = monthly_alienation <= 35000.0
-            gauge_color = "#00CC96" if is_exempt else "#EF553B"
-            fig_tax_gauge = go.Figure(
-                go.Indicator(
-                    mode="gauge+number",
-                    value=monthly_alienation,
-                    number={"prefix": "R$ ", "valueformat": ",.2f"},
-                    gauge={
-                        "axis": {"range": [0, 50000], "tickwidth": 1},
-                        "bar": {"color": gauge_color, "thickness": 0.3},
-                        "steps": [
-                            {"range": [0, 35000], "color": "rgba(0, 204, 150, 0.2)"},
-                            {"range": [35000, 50000], "color": "rgba(239, 85, 59, 0.2)"},
-                        ],
-                        "threshold": {
-                            "line": {"color": "red", "width": 3},
-                            "thickness": 0.8,
-                            "value": 35000.0,
-                        },
-                    },
-                )
-            )
-            fig_tax_gauge.update_layout(height=280, margin=dict(l=20, r=20, t=30, b=20))
-            st.plotly_chart(fig_tax_gauge, use_container_width=True)
-
-        with fg_col2:
-            st.subheader(f"Apuração Fiscal RFB — {now_str}")
-            if is_exempt:
-                st.success(f"✅ **100% ISENTO DE IRPF** (Art. 35 da Lei 8.981/95)\n\n"
-                           f"• Alienação acumulada: `R$ {monthly_alienation:,.2f}`\n"
-                           f"• Margem isenta restante este mês: `R$ {max(0.0, 35000.0 - monthly_alienation):,.2f}`\n"
-                           f"• Imposto a recolher: **R$ 0,00**")
-            else:
-                st.error(f"⚠️ **TETO DE ISENÇÃO EXCEDIDO** (Tributação a 15% via GCAP/DARF)\n\n"
-                         f"• Alienação total: `R$ {monthly_alienation:,.2f}`\n"
-                         f"• Ganho de Capital Líquido: `R$ {tax_report['total_gain_brl']:,.2f}`\n"
-                         f"• Imposto Devido (DARF Cód 4600): **R$ {tax_report['darf_due_brl']:,.2f}**\n"
-                         f"• Vencimento: Último dia útil do mês seguinte no SicalcWeb.")
-
-        st.markdown("---")
-
-        # Staged Cycle Progression
-        st.subheader("Mapa de Degraus Estratégicos do Ciclo")
-        st_col1, st_col2 = st.columns(2)
-
-        with st_col1:
-            st.markdown("**Fase de Acumulação (Bear Market):**")
-            acc_stages = [
-                ("C0", "DCA Inicial (-30% do ATH)", "30%"),
-                ("C1", "Aporte Queda (-45% do ATH)", "15%"),
-                ("C2", "Aporte Queda (-55% do ATH)", "20%"),
-                ("C3", "Capitulação (-65% do ATH ou MVRV <= 0)", "20%"),
-                ("C4", "Confirmação Rompimento 50w SMA", "15% + Sobras"),
-            ]
-            for code, label, alloc in acc_stages:
-                done = code in executed_stages
-                status_icon = "✅ **Executado**" if done else "⏳ Pendente"
-                st.markdown(f"• `{code}`: {label} ({alloc}) — {status_icon}")
-
-        with st_col2:
-            st.markdown("**Fase de Distribuição (Bull Market & Stops):**")
-            dist_stages = [
-                ("V1", "Novo Topo Histórico (> ATH)", "10%"),
-                ("V2", "Expansão de Ciclo (1.3x ATH)", "15%"),
-                ("V3", "Expansão de Ciclo (1.6x ATH)", "15%"),
-                ("V4", "Top Warning (2.0x ATH ou Euforia)", "20%"),
-                ("V5", "Maximum Euphoria (2.5x ATH)", "20%"),
-                ("STOP_1", "Trailing Stop 1 (Perda 21w EMA)", "50% do Saldo"),
-                ("STOP_2", "Trailing Stop 2 (Perda 50w SMA)", "100% exceto Moonbag"),
-            ]
-            for code, label, alloc in dist_stages:
-                done = code in executed_stages
-                status_icon = "✅ **Executado**" if done else "⏳ Pendente"
-                st.markdown(f"• `{code}`: {label} ({alloc}) — {status_icon}")
-
-        st.markdown("---")
-
-        # Transaction Registration & History
-        st.subheader("Registro e Auditoria de Transações")
-
-        with st.expander("➕ Registrar Nova Operação (Compra ou Venda)"):
-            with st.form("tx_form", clear_on_submit=True):
-                f_col1, f_col2, f_col3 = st.columns(3)
-                tx_type = f_col1.selectbox("Tipo de Operação", ["BUY", "SELL"])
-                stage = f_col2.selectbox("Degrau / Gatilho", [
-                    "C0", "C1", "C2", "C3", "C4",
-                    "V1", "V2", "V3", "V4", "V5",
-                    "STOP_1", "STOP_2", "SPLIT_PART_2", "MANUAL"
-                ])
-                exchange = f_col3.text_input("Corretora Nacional", value="Bipa")
-
-                f_col4, f_col5, f_col6 = st.columns(3)
-                btc_amount = f_col4.number_input("Quantidade (BTC)", min_value=0.00000001, max_value=10.0, step=0.005, format="%.8f")
-                price_brl = f_col5.number_input("Preço de Execução (R$/BTC)", min_value=1000.0, step=1000.0, format="%.2f")
-                fee_brl = f_col6.number_input("Taxas Totais (R$)", min_value=0.0, step=1.0, format="%.2f")
-
-                notes = st.text_input("Observações / Runbook", value="")
-                submitted = st.form_submit_button("Gravar Transação no Ledger")
-
-                if submitted:
-                    try:
-                        new_tx = PortfolioTransaction(
-                            date=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                            tx_type=TransactionType(tx_type),
-                            stage=StageType(stage) if stage in StageType.__members__ else StageType.C0,
-                            amount_btc=btc_amount,
-                            price_brl=price_brl,
-                            price_usd=round(price_brl / 5.80, 2),
-                            fee_brl=fee_brl,
-                            exchange=exchange,
-                            notes=notes,
-                        )
-                        record_portfolio_transaction(new_tx, db_path=DB_PATH)
-                        st.success("Transação registrada com sucesso! Novo saldo recalculado.")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Erro ao registrar transação: {exc}")
-
-        # Ledger History
-        txs = get_portfolio_transactions(DB_PATH, limit=100)
-        if txs:
-            tx_data = [
-                {
-                    "Data": t.date,
-                    "Tipo": t.tx_type.value,
-                    "Degrau": t.stage.value if hasattr(t.stage, "value") else str(t.stage),
-                    "Qtd (BTC)": f"{t.amount_btc:.8f}",
-                    "Preço (R$)": f"R$ {t.price_brl:,.2f}",
-                    "Total (R$)": f"R$ {t.amount_btc * t.price_brl:,.2f}",
-                    "Taxa (R$)": f"R$ {t.fee_brl:,.2f}",
-                    "Exchange": t.exchange,
-                    "Notas": t.notes or "",
-                }
-                for t in txs
-            ]
-            st.dataframe(pd.DataFrame(tx_data), use_container_width=True)
-        else:
-            st.info("Nenhuma transação registrada ainda no ledger da carteira.")

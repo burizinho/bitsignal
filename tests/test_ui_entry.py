@@ -36,25 +36,32 @@ def test_cmd_ui_runs_streamlit_app_entrypoint():
 def test_rerun_keeps_rendering_page():
     """Regressão da Q8: no rerun (clique em qualquer controle) a página não pode ficar em branco."""
     pytest.importorskip("streamlit")
+    from datetime import datetime, timezone
+
     from streamlit.testing.v1 import AppTest
 
     import bitsignal.ui.app as app
+    from bitsignal.config import load_config
+    from bitsignal.data.history import load_frozen_history
 
+    history = load_frozen_history(load_config().data.csv_path)
+    now = datetime(2026, 11, 9, 12, tzinfo=timezone.utc)
     old_cwd = os.getcwd()
     os.chdir(ROOT)
     try:
-        # Usa o SQLite versionado sem disparar o pipeline de rede.
-        with mock.patch.object(app, "ensure_data_available", app.load_data):
-            at = AppTest.from_file(str(ENTRY), default_timeout=60).run()
+        with mock.patch.object(app, "load_history", lambda: history), \
+                mock.patch.object(app, "now_utc", lambda: now), \
+                mock.patch.object(app, "cached_spot", lambda: None):
+            at = AppTest.from_file(str(ENTRY), default_timeout=120).run()
             first_titles = [t.value for t in at.title]
-            first_warnings = [w.value for w in at.warning]
+            first_md = [m.value for m in at.markdown]
             at.run()
             rerun_titles = [t.value for t in at.title]
-            rerun_warnings = [w.value for w in at.warning]
+            rerun_md = [m.value for m in at.markdown]
     finally:
         os.chdir(old_cwd)
 
     assert not at.exception
     assert first_titles and rerun_titles == first_titles
-    assert app.OLD_PANEL_WARNING in first_warnings
-    assert app.OLD_PANEL_WARNING in rerun_warnings
+    assert any("Semana fechada" in m for m in first_md)
+    assert any("Semana fechada" in m for m in rerun_md)
