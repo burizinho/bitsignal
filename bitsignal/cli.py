@@ -1,6 +1,7 @@
 """Command Line Interface for BitSignal."""
 
 import argparse
+import io
 import os
 import subprocess
 import sys
@@ -238,6 +239,12 @@ def cmd_backtest(args):
 
     cfg = load_config()
     frozen = load_frozen_params(cfg.backtest.frozen_params)
+    record = getattr(args, "record", False)
+    if record:
+        refusal = _record_refusal(args, cfg, frozen)
+        if refusal:
+            print(f"[RECUSADO] {refusal}")
+            sys.exit(1)
     history = load_frozen_history(cfg.data.csv_path)
     try:
         report = run_backtest(
@@ -247,11 +254,143 @@ def cmd_backtest(args):
         print(f"[ERRO] {exc}")
         sys.exit(1)
     print(to_text(report))
+    if record:
+        _write_approval(cfg, frozen, report)
+        return
     if args.window == "development" and frozen is not None and frozen.approval is not None:
         a = frozen.approval
         print("")
         print(f"Approval gravado no S6 ({a.run_at:%Y-%m-%d}): {a.passed.model_dump()} {a.values.model_dump()}")
         print("O recálculo acima é só exibição; o resultado oficial é o gravado.")
+
+
+# --------------------------------------------------------------------------------------
+# S6 — freeze and single 2019+ evaluation (design plan item 35)
+# --------------------------------------------------------------------------------------
+
+TECHNICAL_TESTS = [
+    "tests/test_weekly.py",
+    "tests/test_score.py",
+    "tests/test_detector.py",
+    "tests/test_detector_golden.py",
+    "tests/test_cycle.py",
+    "tests/test_no_lookahead.py",
+    "tests/test_parity.py",
+    "tests/test_backtest.py",
+    "tests/test_golden.py",
+]
+
+
+def _run_technical_tests() -> bool:
+    """Run the single list of technical tests (Verification Plan) without coverage."""
+    from bitsignal.config import REPO_ROOT
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "--no-cov", *TECHNICAL_TESTS], cwd=str(REPO_ROOT)
+    )
+    return proc.returncode == 0
+
+
+def _git_committed_clean(path) -> bool:
+    """True when ``path`` is tracked by git and has no uncommitted change."""
+    from bitsignal.config import REPO_ROOT
+
+    root = str(REPO_ROOT)
+    tracked = subprocess.run(["git", "ls-files", "--error-unmatch", str(path)], cwd=root, capture_output=True)
+    if tracked.returncode != 0:
+        return False
+    status = subprocess.run(["git", "status", "--porcelain", "--", str(path)], cwd=root, capture_output=True, text=True)
+    return status.stdout.strip() == ""
+
+
+def _set_frozen_pointer(config_path, rel_path: str) -> None:
+    """Point ``backtest.frozen_params`` to the frozen file, editing only that line (keeps comments)."""
+    lines = io.open(config_path, encoding="utf-8").read().split("\n")
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("frozen_params:"):
+            indent = line[: len(line) - len(line.lstrip())]
+            comment = line[line.index("#"):] if "#" in line else ""
+            lines[i] = f"{indent}frozen_params: {rel_path}" + (f"  {comment}" if comment else "")
+            break
+    else:
+        raise RuntimeError("backtest.frozen_params not found in config")
+    io.open(config_path, "w", encoding="utf-8", newline="\n").write("\n".join(lines))
+
+
+def cmd_freeze_params(args):
+    """Freeze the model parameters (S6, step 1). Never overwrites an existing freeze."""
+    from datetime import datetime, timezone
+
+    from bitsignal.config import (
+        DEFAULT_CONFIG_PATH,
+        REPO_ROOT,
+        FrozenParams,
+        load_config,
+        model_hash,
+        model_payload,
+        repo_path,
+        write_frozen_params,
+    )
+    from bitsignal.data.history import load_frozen_history
+
+    now = datetime.now(timezone.utc)
+    out = args.out or f"config/frozen/params_{now:%Y-%m-%d}.yaml"
+    target = repo_path(out)
+    if target.exists():
+        print(f"[RECUSADO] {out} já existe: um congelamento nunca é sobrescrito.")
+        sys.exit(1)
+    if not _run_technical_tests():
+        print("[RECUSADO] testes técnicos falharam; nada foi congelado.")
+        sys.exit(1)
+    cfg = load_config()
+    history = load_frozen_history(cfg.data.csv_path)
+    frozen = FrozenParams(
+        frozen_at=now,
+        csv_sha256=history.csv_sha256,
+        model_hash=model_hash(cfg),
+        model=model_payload(cfg),
+        approval=None,
+    )
+    write_frozen_params(target, frozen)
+    rel = target.relative_to(REPO_ROOT).as_posix() if target.is_relative_to(REPO_ROOT) else str(target)
+    _set_frozen_pointer(getattr(args, "config_path", None) or DEFAULT_CONFIG_PATH, rel)
+    print(f"[OK] Parâmetros congelados em {rel} (model_hash {frozen.model_hash[:12]}…).")
+    print("     Próximo passo: commitar este arquivo e o config.yaml; só depois rodar")
+    print("     `bitsignal backtest --window development --record`.")
+
+
+def _record_refusal(args, cfg, frozen):
+    """Reason to refuse ``--record``, or None."""
+    from bitsignal.config import model_hash, repo_path
+
+    if args.window != "development":
+        return "--record só vale com --window development."
+    if frozen is None:
+        return "não há arquivo de parâmetros congelados (rode freeze-params primeiro)."
+    if frozen.approval is not None:
+        return "o approval já foi gravado; a avaliação 2019+ é gravada uma única vez."
+    if frozen.model_hash != model_hash(cfg):
+        return "os parâmetros em uso diferem dos congelados (model_hash)."
+    if not _git_committed_clean(repo_path(cfg.backtest.frozen_params)):
+        return "o arquivo congelado não está commitado (ou tem alterações); commite antes do --record."
+    return None
+
+
+def _write_approval(cfg, frozen, report):
+    from datetime import datetime, timezone
+
+    from bitsignal.config import Approval, repo_path, write_frozen_params
+
+    approval = Approval(
+        run_at=datetime.now(timezone.utc),
+        window="development",
+        passed=report.criteria["passed"],
+        values=report.criteria["values"],
+    )
+    path = repo_path(cfg.backtest.frozen_params)
+    write_frozen_params(path, frozen.model_copy(update={"approval": approval}))
+    print("")
+    print(f"[OK] Resultado da avaliação 2019+ gravado em {cfg.backtest.frozen_params}. Commite este arquivo.")
 
 
 def cmd_ui(args):
@@ -443,6 +582,12 @@ def main():
     p_bt.add_argument("--window", choices=["calibration", "development"], default="calibration",
                       help="calibration (default, no 2019+ criteria) or development (needs frozen params)")
     p_bt.add_argument("--no-sensitivities", action="store_true", help="Skip the sensitivities")
+    p_bt.add_argument("--record", action="store_true",
+                      help="S6 only: record the single 2019+ evaluation in the frozen file")
+
+    # freeze-params (S6)
+    p_fz = subparsers.add_parser("freeze-params", help="Freeze the model parameters (S6)")
+    p_fz.add_argument("--out", default=None, help="Default: config/frozen/params_<date>.yaml")
 
     # ui
     subparsers.add_parser("ui", help="Launch Streamlit dashboard")
@@ -489,6 +634,8 @@ def main():
         cmd_ui(args)
     elif args.command == "fetch-history":
         cmd_fetch_history(args)
+    elif args.command == "freeze-params":
+        cmd_freeze_params(args)
     elif args.command == "strategy-status":
         cmd_strategy_status(args)
     elif args.command == "strategy-record-tx":
