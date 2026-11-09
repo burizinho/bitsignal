@@ -251,6 +251,40 @@ def cmd_ui(args):
     subprocess.run([sys.executable, "-m", "streamlit", "run", app_path])
 
 
+def cmd_fetch_history(args):
+    """S3: download CoinMetrics history and write the frozen CSV + meta (offline afterwards)."""
+    from bitsignal.config import load_config, repo_path
+    from bitsignal.data.coinmetrics import check_catalog, fetch_coinmetrics
+    from bitsignal.data.history import compare_histories, from_frame, load_frozen_history, write_frozen_history
+
+    cfg = load_config()
+    out = args.out or cfg.data.csv_path
+
+    catalog = check_catalog()
+    missing = [m for m, ok in catalog.items() if not ok]
+    if missing:
+        print(f"[ERRO] Métricas fora do plano Community da CoinMetrics: {missing}")
+        sys.exit(1)
+
+    df = fetch_coinmetrics()
+    live = from_frame(df, source="coinmetrics_live")
+
+    previous = repo_path(out)
+    if previous.exists():
+        diffs = compare_histories(live, load_frozen_history(previous))
+        if diffs.empty:
+            print("[OK] Histórico ao vivo igual ao CSV anterior na janela comum.")
+        else:
+            print(f"[AVISO] {len(diffs)} diferença(s) contra o CSV anterior (revisão da CoinMetrics?):")
+            print(diffs.head(20).to_string(index=False))
+
+    meta = write_frozen_history(df, out)
+    print(f"[OK] {meta['rows']} linhas gravadas em {out} (as_of {meta['last_date']}, sha256 {meta['sha256'][:12]}…)")
+    if meta["gaps"]:
+        for col, dates in meta["gaps"].items():
+            print(f"     lacuna em {col}: {len(dates)} dia(s), primeiro {dates[0]}")
+
+
 def cmd_strategy_status(args):
     """Display current portfolio balance, CMP, and monthly tax alienation status."""
     db_path = args.db_path or os.getenv("DATABASE_PATH", "./data/bitsignal.db")
@@ -403,6 +437,10 @@ def main():
     # ui
     subparsers.add_parser("ui", help="Launch Streamlit dashboard")
 
+    # fetch-history (S3)
+    p_fh = subparsers.add_parser("fetch-history", help="Download CoinMetrics history into the frozen CSV")
+    p_fh.add_argument("--out", default=None, help="CSV path (default: data.csv_path from config)")
+
     # strategy-status
     subparsers.add_parser("strategy-status", help="Show current portfolio balance, CMP, and tax status")
 
@@ -439,6 +477,8 @@ def main():
         cmd_backtest(args)
     elif args.command == "ui":
         cmd_ui(args)
+    elif args.command == "fetch-history":
+        cmd_fetch_history(args)
     elif args.command == "strategy-status":
         cmd_strategy_status(args)
     elif args.command == "strategy-record-tx":

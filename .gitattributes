@@ -1,0 +1,6 @@
+# Arquivos de dados com hash: guardar byte a byte, sem conversão de fim de linha
+# (core.autocrlf no Windows mudaria o sha256 do CSV congelado e o load recusaria o arquivo).
+data/historical/*.csv -text
+data/historical/*.json -text
+tests/golden/*.json -text
+config/frozen/*.yaml -text
