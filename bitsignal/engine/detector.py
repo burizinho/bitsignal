@@ -19,11 +19,30 @@ def _consecutive(cond: pd.Series, k: int) -> pd.Series:
     return cond.astype(int).rolling(k, min_periods=k).sum().eq(k)
 
 
-def detect(weekly: pd.DataFrame, cfg: Config) -> pd.DataFrame:
+SCORE60_WEEKS = 26  # arm_score60 (pre-registered, design §7)
+
+
+def _armed(weekly: pd.DataFrame, cfg: Config, score_df: Optional[pd.DataFrame]) -> pd.Series:
+    """Arming rule. ``ath`` is the model; ``score60`` / ``score35`` are Phase 2 comparisons."""
+    mode = cfg.comparison.detector_arming
+    if mode == "ath":
+        return weekly["new_ath"].astype(int).rolling(cfg.detector.arming_weeks, min_periods=1).max().astype(bool)
+    if score_df is None:
+        raise ValueError(f"detector_arming={mode!r} needs score_df")
+    valid = score_df["status"] != "UNAVAILABLE"
+    if mode == "score60":
+        cond = valid & (score_df["score_max"] >= 60)
+        return cond.astype(int).rolling(SCORE60_WEEKS, min_periods=1).max().astype(bool)
+    return (valid & (score_df["score_min"] > 35)).astype(bool)
+
+
+def detect(weekly: pd.DataFrame, cfg: Config, score_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     det = cfg.detector
     k = det.confirm_weeks
     price = weekly["price"]
-    armed = weekly["new_ath"].astype(int).rolling(det.arming_weeks, min_periods=1).max().astype(bool)
+    armed = _armed(weekly, cfg, score_df)
+    if not cfg.comparison.detector_enabled:  # ladder_only (D2): no episode, never blocks the reset
+        armed = pd.Series(False, index=weekly.index)
     below_trend = _consecutive(price < weekly["trend_sma"], k)
     above_trend = _consecutive(price > weekly["trend_sma"], k)
     below_n2 = _consecutive(price < weekly["n2_sma"], k)

@@ -12,9 +12,13 @@ from bitsignal.models import ReplayResult
 
 
 def run_model(history: MarketHistory, cfg: Config) -> ReplayResult:
+    if cfg.comparison.model == "minimal":  # Phase 2 comparison model (never the dashboard)
+        from bitsignal.backtest.minimal import run_minimal
+
+        return run_minimal(history, cfg)
     daily = derive_daily(history, cfg)
     weekly = to_weekly(daily, history.as_of, cfg)
     score_df = score_weekly(weekly, cfg)
-    detector_df = detect(weekly, cfg)
+    detector_df = detect(weekly, cfg, score_df)
     weeks, events = replay(weekly, score_df, detector_df, cfg)
     return ReplayResult(weeks=weeks, events=events, as_of=history.as_of, model_hash=model_hash(cfg))

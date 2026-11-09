@@ -32,6 +32,9 @@ def cmd_backtest(args):
     cfg = load_config()
     frozen = load_frozen_params(cfg.backtest.frozen_params)
     record = getattr(args, "record", False)
+    if getattr(args, "variants", False):
+        _backtest_variants(args, cfg, frozen, record)
+        return
     if record:
         refusal = _record_refusal(args, cfg, frozen)
         if refusal:
@@ -54,6 +57,23 @@ def cmd_backtest(args):
         print("")
         print(f"Approval gravado no S6 ({a.run_at:%Y-%m-%d}): {a.passed.model_dump()} {a.values.model_dump()}")
         print("O recálculo acima é só exibição; o resultado oficial é o gravado.")
+
+
+def _backtest_variants(args, cfg, frozen, record) -> None:
+    """Phase 2: default model plus the comparison catalog (never recorded, never frozen)."""
+    from bitsignal.backtest.engine import run_variants
+    from bitsignal.backtest.report import variants_to_text
+    from bitsignal.data.history import load_frozen_history
+
+    if record:
+        print("[RECUSADO] --record não vale com --variants: variantes nunca são gravadas.")
+        sys.exit(1)
+    try:
+        res = run_variants(load_frozen_history(cfg.data.csv_path), cfg, window=args.window, frozen=frozen)
+    except ValueError as exc:
+        print(f"[ERRO] {exc}")
+        sys.exit(1)
+    print(variants_to_text(res, args.window))
 
 
 # --------------------------------------------------------------------------------------
@@ -300,6 +320,8 @@ def main():
     p_bt.add_argument("--window", choices=["calibration", "development"], default="calibration",
                       help="calibration (default, no 2019+ criteria) or development (needs frozen params)")
     p_bt.add_argument("--no-sensitivities", action="store_true", help="Skip the sensitivities")
+    p_bt.add_argument("--variants", action="store_true",
+                      help="Phase 2: default model plus the comparison variants (never recorded)")
     p_bt.add_argument("--record", action="store_true",
                       help="S6 only: record the single 2019+ evaluation in the frozen file")
 

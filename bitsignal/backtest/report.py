@@ -68,6 +68,52 @@ def to_text(report) -> str:
     return "\n".join(lines)
 
 
+VARIANTS_HEADER = "Comparação sobre janela já vista: não aprova nem substitui o modelo padrão."
+
+
+def _variant_metrics(e: Dict, window: str):
+    """(× comprar e segurar, melhora da queda máxima em p.p., × DCA uniforme).
+    Development: the Q1 values rebased at 2019-01-01. Calibration: the whole window."""
+    if window == "development":
+        v = e["criteria"]["values"]
+        return v["equity_vs_bnh"], v["dd_improvement_pp"], v["equity_vs_uniform"]
+    s, b, u = e["strategy"], e["bnh"], e["uniform"]
+    return (s["equity_end_usd"] / b["equity_end_usd"], b["max_dd_pp"] - s["max_dd_pp"],
+            s["equity_end_usd"] / u["equity_end_usd"])
+
+
+def variants_to_text(res: Dict[str, Dict[str, Dict]], window: str) -> str:
+    """Phase 2 table: default first, then the pre-registered catalog, then the post-hoc variants."""
+    basis = "rebaseado em 2019-01-01" if window == "development" else "janela inteira"
+    lines = [
+        "=" * 100,
+        f"BitSignal — variantes de comparação (Fase 2), janela {window} ({basis})",
+        VARIANTS_HEADER,
+        "=" * 100,
+        f"  {'variante':<15} {'patrimônio':>12} {'×B&H':>6} {'ΔDD pp':>7} {'×unif':>6} "
+        f"{'BTC':>7} {'caixa':>10} {'vendas':>6} {'ciclos':>6}",
+    ]
+    titles = (("default", "Modelo padrão (decide)"), ("pre_registered", "Pré-registradas (§7 da Fase 1)"),
+              ("post_hoc", "Pós-resultado (D1): escolhidas depois de ver os dados"))
+    for group, title in titles:
+        lines.append(f"-- {title}")
+        for name, e in res.get(group, {}).items():
+            if not e.get("applicable"):
+                lines.append(f"  {name:<15} não aplicável")
+                continue
+            x_bnh, ddi, x_uni = _variant_metrics(e, window)
+            lines.append(
+                f"  {name:<15} {e['strategy']['equity_end_usd']:>12,.0f} {x_bnh:>6.3f} {ddi:>7.1f} {x_uni:>6.3f} "
+                f"{e['btc_end']:>7.3f} {e['cash_end']:>10,.0f} {e['n_sells']:>6} {e['n_cycles']:>6}"
+            )
+    lines += [
+        "",
+        "×B&H = patrimônio / comprar e segurar; ΔDD = queda máx. do comprar e segurar − da variante;",
+        "×unif = patrimônio / DCA uniforme com as mesmas vendas; ciclos = reinícios dentro da janela.",
+    ]
+    return "\n".join(lines)
+
+
 def to_frames(report) -> Dict[str, pd.DataFrame]:
     eq = pd.DataFrame(
         {

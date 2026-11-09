@@ -113,3 +113,65 @@ itens 1 e 3. Por isso a decisão D1.
 6.  `cli.py`: `backtest --variants`; `report.py`: tabela de variantes com o cabeçalho fixo.
 7.  Testes: um caso sintético por chave nova; `test_variants.py` com a lista fixa de nomes; o padrão
     sem `variants` continua igual ao golden (o `model_hash` e o `replay_summary.json` não mudam).
+
+## Ajustes feitos na implementação
+
+*   **Chaves de comparação num bloco próprio.** Em vez de `detector.enabled`, `buys.leftover_on_reset`
+    etc., todas as opções novas ficam em `comparison:` (`model`, `detector_enabled`,
+    `detector_arming`, `leftover_on_reset`, `buy_sizing`, `floor_base`, `minimal`), com valores
+    padrão. Motivo: `detector`, `buys` e `cap` entram inteiros no `model_hash`; acrescentar campos
+    neles mudaria o hash congelado da Fase 1. `validate_for_panel` rejeita qualquer valor fora do
+    padrão nesse bloco.
+*   **Catálogo no código, não no config.** `bitsignal/backtest/variants.py` tem a lista fixa
+    (`PRE_REGISTERED_NAMES`, `POST_HOC_NAMES`), testada em `tests/test_variants.py`.
+*   **`floor60`:** o config proíbe níveis do detector acima do teto, então a variante também limita os
+    níveis a 40%, como o §7 já previa ("o N3 de 50% fica limitado a 40%").
+*   **`floor_initial`:** a parte de uma venda bloqueada pelo piso é descartada, não adiada. Sem isso,
+    cada compra da fase ACUMULAR era vendida de volta na semana seguinte.
+*   **`minimal`, interpretação de D4:** as vendas valem na primeira semana do ciclo em que o gatilho é
+    verdadeiro; as compras por queda (50% e 70%) valem na primeira semana da fase ACUMULAR em que a
+    condição é verdadeira, mesmo que a queda tenha começado antes da fase. Um gatilho já ativo no
+    início da carteira não gera venda retroativa por causa da herança de estado (§7 da Fase 1), como no
+    modelo padrão. A leitura literal ("só na semana em que passa de falso para verdadeiro") faria as
+    compras por queda quase nunca acontecerem, porque a queda de 50% costuma vir antes do fechamento
+    abaixo da SMA200w.
+
+## Resultados (2026-11-09, CSV congelado `ed34e12de88c…`)
+
+`bitsignal backtest --variants --window development`, rebaseado em 2019-01-01 (×B&H = patrimônio /
+comprar e segurar; ΔDD = melhora da queda máxima em p.p.; ×unif = patrimônio / DCA uniforme):
+
+| Variante | ×B&H | ΔDD | ×unif | BTC final | Caixa final |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| **default** | 0,325 | 31,3 | 1,016 | 0,379 | 38.736 |
+| ladder_only | 0,537 | 22,5 | 1,012 | 0,952 | 25.543 |
+| arm_score60 | 0,322 | 31,4 | 1,013 | 0,534 | 31.198 |
+| arm_score35 | 0,357 | 25,6 | 1,013 | 0,738 | 23.713 |
+| det_sma20 | 0,325 | 31,3 | 1,016 | 0,379 | 38.714 |
+| norm_high | 0,255 | 26,6 | 1,024 | 0,470 | 32.825 |
+| minimal | 0,453 | 19,9 | 1,032 | 1,078 | 23.644 |
+| floor40 | 0,325 | 31,3 | 1,016 | 0,379 | 38.736 |
+| floor60 | 0,421 | 26,8 | 1,014 | 0,533 | 41.428 |
+| leftover_buy | 0,761 | 15,2 | 1,007 | 1,869 | 17.232 |
+| thr_plus5 | 0,282 | 25,5 | 1,023 | 0,462 | 30.709 |
+| thr_minus5 | 0,365 | 27,8 | 1,002 | 0,346 | 31.416 |
+| *proceeds_dca (pós-resultado)* | *1,160* | *20,5* | *1,198* | *2,636* | *19.655* |
+| *floor_initial (pós-resultado)* | *0,326* | *30,8* | *1,011* | *0,503* | *29.668* |
+
+Leitura (diagnóstico, não aprovação):
+
+1.  **Reinvestir o caixa é o que mais pesa.** `leftover_buy`, pré-registrada, leva o patrimônio de
+    0,325 para 0,761 do comprar e segurar. `proceeds_dca` chega a 1,160, mas foi escolhida depois de ver
+    os dados: é hipótese para a Fase 3, não evidência.
+2.  **O detector custa patrimônio.** Sem ele (`ladder_only`), 0,537; em troca, a melhora da queda
+    máxima cai de 31,3 para 22,5 p.p.
+3.  **O piso por ciclo quase não importa** (`floor_initial` 0,326); o tamanho do teto importa um pouco
+    (`floor60` 0,421).
+4.  **Ajustes finos de limiar e normalização não ajudam** (`thr_plus5`, `thr_minus5`, `norm_high`,
+    `det_sma20`, `floor40`).
+5.  **O `minimal` (0,453) supera o padrão nesta janela**: a complexidade do modelo completo não se
+    pagou aqui.
+
+Ressalvas: uma única trajetória de preço; a janela 2019+ tem cerca de dois ciclos; todas as linhas
+usam dados já vistos. Nenhuma variante substitui o padrão. Uma mudança de modelo exige o design da
+Fase 3, um novo congelamento e avaliação com dados futuros (registro semanal).
