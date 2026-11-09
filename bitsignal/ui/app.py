@@ -43,6 +43,7 @@ from bitsignal.config import (  # noqa: E402
     load_config,
     load_frozen_params,
     model_hash,
+    repo_path,
     validate_for_panel,
 )
 from bitsignal.data import dune as dune_mod  # noqa: E402
@@ -52,7 +53,8 @@ from bitsignal.data.history import derive_daily, from_frame, load_frozen_history
 from bitsignal.engine.cycle import data_status, latest_verdict  # noqa: E402
 from bitsignal.engine.pipeline import run_model  # noqa: E402
 from bitsignal.models import DataStatus, InputState, Phase, ScoreStatus  # noqa: E402
-from bitsignal.ui import calculator, charts, whatif  # noqa: E402
+from bitsignal.ui import calculator, charts, export, whatif  # noqa: E402
+from bitsignal.verdict_log import verdict_row  # noqa: E402
 
 # --------------------------------------------------------------------------------------
 # Injection points (module level; patched by tests/test_app_smoke.py)
@@ -232,6 +234,27 @@ def render_detector(result):
         st.write("Detector de reversão: **desarmado**")
 
 
+def render_export(result, verdict, cfg, now):
+    """CSV downloads for the user's spreadsheet: the model's verdict, not the user's operations."""
+    st.markdown("**Exportar para a planilha**")
+    fmt = st.radio("Formato do CSV", ["Excel / Planilhas em português (; e vírgula)",
+                                      "Internacional (, e ponto)"], horizontal=True, key="export_format")
+    brazil = fmt.startswith("Excel")
+    week = verdict.week.isoformat()
+    c1, c2 = st.columns(2)
+    c1.download_button("Veredito desta semana (CSV)",
+                       data=export.rows_to_csv([verdict_row(result, verdict, now)], brazil),
+                       file_name=f"bitsignal_veredito_{week}.csv", mime="text/csv", key="dl_verdict")
+    log = export.read_log(repo_path(cfg.data.verdict_log_path))
+    if log:
+        c2.download_button(f"Registro semanal gravado ({len(log)} semanas)", data=export.rows_to_csv(log, brazil),
+                           file_name=f"bitsignal_registro_{Path(cfg.data.verdict_log_path).stem}.csv",
+                           mime="text/csv", key="dl_log")
+    else:
+        c2.caption("Registro semanal deste modelo ainda vazio.")
+    st.caption("Mesmas colunas do registro semanal. É o que o modelo disse, não um registro das suas operações.")
+
+
 def render_what_would_change(result, cfg):
     """Next triggers of the model and today's distance to them (read-only explanation)."""
     st.markdown("**O que mudaria o veredito**")
@@ -385,6 +408,7 @@ def main():
         render_detector(result)
         render_what_would_change(result, cfg)
         render_calculator(verdict, float(last["price"]))
+        render_export(result, verdict, cfg, now)
     with tab_inputs:
         render_inputs(result, history, cfg)
         render_dune(history, cfg)

@@ -70,6 +70,8 @@ def test_top_line_and_experimental_badge():
     assert "Janela de calibração" in texts(at.caption)
     assert "não alteram a posição-base" in texts(at.info)  # ACCUMULATE fixed notice
     assert "O que mudaria o veredito" in texts(at.markdown)
+    assert "Exportar para a planilha" in texts(at.markdown)
+    assert len(at.get("download_button")) == 2  # this week's verdict + the recorded weekly log
     assert "score mínimo ≥ 30 por 2 semanas" in texts(at.markdown)
 
 
