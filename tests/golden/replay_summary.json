@@ -1,0 +1,43 @@
+{
+  "calibration": {
+    "bnh_equity_end": 5516.245065101003,
+    "strategy_equity_end": 10386.166336798433,
+    "strategy_max_dd": 66.13787305598939,
+    "uniform_equity_end": 10383.7394492772
+  },
+  "cycle_starts": [
+    "2015-12-13"
+  ],
+  "sell_steps": [
+    {
+      "after": 0.1,
+      "date": "2011-09-18",
+      "mechanism": "detector"
+    },
+    {
+      "after": 0.5,
+      "date": "2011-10-09",
+      "mechanism": "detector"
+    },
+    {
+      "after": 0.05,
+      "date": "2017-08-13",
+      "mechanism": "escada"
+    },
+    {
+      "after": 0.15,
+      "date": "2017-09-03",
+      "mechanism": "escada"
+    },
+    {
+      "after": 0.3,
+      "date": "2017-12-03",
+      "mechanism": "escada"
+    },
+    {
+      "after": 0.5,
+      "date": "2018-06-03",
+      "mechanism": "detector"
+    }
+  ]
+}

@@ -1,117 +1,106 @@
-# Relatório de Compreensão: Estratégia de Ciclo Macro com Gestão Tributária Nacional
+# Relatório de Compreensão (Etapa 6): Modelo de Ciclo Unificado e Painel Só de Leitura
 
-**Documento Auditado:** [`docs/designs/bitcoin_national_execution_strategy.md`](file:///c:/Users/gsame/projetos/bitsignal/docs/designs/bitcoin_national_execution_strategy.md)  
-**Escopo Avaliado:** FeatureRange (linhas 1..302) e DetailedRange (linhas 303..349)  
-**Status do Teste de Compreensão:** ⚠️ Aprovado com Ressalvas (2 Bloqueadores, 5 Maiores, 5 Nits)
-
----
-
-## 1. Paraphrase First
-
-### What this proposes
-O documento propõe expandir o BitSignal — originalmente um sentinela observacional — para uma plataforma de orquestração de estratégias de ciclo macro de 3 a 4 anos do Bitcoin, voltada para investidores pessoa física brasileiros com patrimônio até 0.5 BTC. O novo módulo isolado (`bitsignal.strategy`) automatiza regras determinísticas de acumulação escalonada em bear market (C1–C4), desova gradual em topos parabólicos (V1–V5) e trailing stops dominicais de emergência (21w EMA e 50w SMA). Crucialmente, integra um motor de conformidade fiscal brasileira que explora a isenção mensal de alienações de até R$ 35.000,00 da Receita Federal (com algoritmo de fracionamento intermensal no fechamento do mês), calcula Custo Médio Ponderado, apura DARF (código 4600) e despacha runbooks práticos via Telegram para liquidação no par BTC/BRL e off-ramp via PIX para renda fixa diária.
-
-### How the existing system works, per this document
-Conforme descrito no documento, o BitSignal existente funciona estritamente como um sentinela quantitativo macro analítico e passivo, agnóstico a jurisdições geográficas ou moedas fiduciárias locais. Ele ingere dados de mercado e métricas on-chain, computa indicadores técnicos e persiste séries temporais no banco SQLite em modo WAL (`data/bitsignal.db`), exibindo dados via dashboard Streamlit e disparando alertas analíticos no Telegram. Atualmente, o sistema não possui consciência de carteira real, não rastreia estoque ou transações do usuário, não realiza gestão fiscal e não emite diretrizes operacionais de execução bancária ou de custódia.
+**Documento auditado:** [`docs/designs/bitcoin_unified_cycle_model.md`](docs/designs/bitcoin_unified_cycle_model.md)
+**Data:** 2026-11-08
+**Revisor:** `egm-comprehension` (contexto isolado). FeatureRange 1..592; DetailedRange 593..1010.
+**Contexto Goldfish:** `config/config.yaml`, `bitsignal/ui/app.py`, `bitsignal/engine/normalizer.py`, `docs/reviews/bitcoin_unified_cycle_model/probe.py`.
 
 ---
 
-## 2. Findings & Discrepancies
+**O que isto propõe**
 
-### 🔴 Bloqueadores (Blockers)
+Hoje o painel tem dois sistemas de decisão. O documento propõe trocá-los por uma única função pura e sem estado, `run_model`/`replay()`. Ela reconstrói desde 2010, semana a semana e só com semanas fechadas (W-SUN), o score de valuation, um detector de reversão por tendência de preço (D), o ciclo com catraca e as compras. Daí sai um veredito com fase (ACUMULAR/MANTER/DISTRIBUIR), exposição-alvo e % de compra sobre uma reserva-base. A venda acumulada tem teto de 50% por ciclo. Ela é dada pelo maior valor entre a escada do score (85/90/93 → 5/15/30%) e o nível do detector (10/25/50%). O ciclo reinicia em duas etapas pelo score (≤20 e depois ≥30). Painel e backtest usam só a CoinMetrics Community, sem persistência. O backtest simula a carteira contra "comprar e segurar" e "DCA uniforme completo", com três critérios cumulativos fixados antes de rodar. A implementação vem em 10 commits (S0–S9), e o dono decide a severidade de D e a política de sobra em S6.
 
-#### 1. Snippet `evaluate_tax_strategy` com Variáveis Não Declaradas e Falha no Acúmulo Mensal
-* **Severidade:** 🔴 Blocker
-* **Escopo Afetado:** Linhas 148–161 ([`bitsignal/strategy/tax_br.py`](file:///c:/Users/gsame/projetos/bitsignal/docs/designs/bitcoin_national_execution_strategy.md#L148-L161))
-* **Descrição da Discrepância:**
-  1. No bloco `else:`, o código tenta calcular `capital_gain = alienation_brl - (quantity_sold * current_cmp)`, porém nem `quantity_sold` nem `current_cmp` constam na assinatura da função `evaluate_tax_strategy(alienation_brl: float, signal_date: datetime)`.
-  2. O teste `if alienation_brl <= 35000.0:` avalia a ordem isolada e ignora o volume já alienado no mês civil corrente (`tax_monthly_ledger.total_alienated_brl`). Pela Lei 8.981/1995 (art. 35), o teto de R$ 35.000,00 é **agregado mensal**. Se o usuário já vendeu R$ 20.000,00 no dia 05 e vende R$ 20.000,00 no dia 20, a segunda venda NÃO é isenta, e todo o ganho de capital do mês deve ser tributado a 15%.
-* **Recomendação:** Ajustar a assinatura e a lógica para receber o histórico do mês:
-  ```python
-  def evaluate_tax_strategy(
-      alienation_brl: float,
-      quantity_sold: float,
-      current_cmp: float,
-      month_accumulated_alienation: float,
-      signal_date: datetime
-  ) -> TaxExecutionPlan:
-      total_month = month_accumulated_alienation + alienation_brl
-      if total_month <= 35000.0:
-          return TaxExecutionPlan(action="SELL_FULL", status="EXEMPT", darf_amount=0.0)
-      elif month_accumulated_alienation == 0.0 and 35000.0 < alienation_brl <= 70000.0 and signal_date.day >= 25:
-          ...
-  ```
+**Como o sistema existente funciona, segundo este documento**
 
-#### 2. Ausência de Gatilho de Agendamento para Execução do Split Intermensal
-* **Severidade:** 🔴 Blocker
-* **Escopo Afetado:** Linhas 152–155, 162–164, 198–200 ([`bitsignal/strategy/weekly_evaluator.py`](file:///c:/Users/gsame/projetos/bitsignal/docs/designs/bitcoin_national_execution_strategy.md#L152-L200))
-* **Descrição da Discrepância:** O algoritmo prevê o fracionamento `SPLIT_MONTH_END` onde a parte 2 é agendada para o primeiro dia do mês subsequente, registrando `strategy_state.pending_split_btc` e `pending_split_scheduled_date`. Contudo, o módulo `weekly_evaluator` é documentado para rodar **exclusivamente aos domingos/segundas** (`weekday() == 0`). Se o dia 1º do mês cair em uma terça, quarta, quinta, sexta ou sábado, não há nenhum processo agendado que acione o alerta de venda da segunda parcela. O usuário ficaria exposto à oscilação do mercado por até 6 dias adicionais sem runbook de execução.
-* **Recomendação:** Especificar no plano técnico que o orquestrador diário do BitSignal (`bitsignal.cli` / rotina diária) verificará diariamente na virada do mês (`signal_date.day == 1`) se há ordens em `strategy_state.pending_split_btc` com `status == 'PENDING'`, emitindo o alerta de liquidação da parte 2 imediatamente às 09h00 BRT do dia 1º.
+O app Streamlit tem a aba "Sentinela", com o Composite Score 0–100 e faixas de venda em 80/85/90. Tem também a aba "Plano Nacional", que compra e vende por distância a um ATH fixo de US$ 126 mil, com trailing stops. As duas não conversam e podem dar ordens contraditórias, e há três tetos de venda diferentes. O score tem erros: Pi Cycle Bottom invertido, candles abertos, `config.yaml` ignorado pelo motor e valores fixos de reserva apresentados como dado real. O backtest usa MVRV/Puell sintéticos e resultados fixos. Em produção, o pipeline roda a cada visita por causa do `created_at`, o SQLite se perde a cada reinício e a Binance é bloqueada nos EUA.
+
+O revisor conseguiu parafrasear as duas partes. Os problemas abaixo são de coerência interna e de conceitos que o leitor não consegue fechar só com o documento.
 
 ---
 
-### 🟡 Maiores (Major)
+## Achados
 
-#### 3. Contradição na Definição Temporal da EMA de 21 Semanas
-* **Severidade:** 🟡 Major
-* **Escopo Afetado:** Linha 138 vs. Linha 313 ([`bitsignal/strategy/trailing_stops.py`](file:///c:/Users/gsame/projetos/bitsignal/docs/designs/bitcoin_national_execution_strategy.md#L138-L313))
-* **Descrição da Discrepância:** Na linha 138, a EMA é descrita como "calculada sobre fechamentos semanais com $\alpha = \frac{2}{21+1}$" ($\alpha \approx 0.0909$). Na linha 313, a implementação descreve "$\text{EMA}_{21w}$ (147 dias)". Uma EMA de 147 períodos sobre barras diárias possui $\alpha = \frac{2}{148} \approx 0.0135$, reagindo de forma muito mais lenta e gerando valores substancialmente divergentes da EMA de 21 barras semanais.
-* **Recomendação:** Padronizar a documentação deixando explícito que a série temporal deve ser reamostrada em velas semanais (fechamento domingo 21h BRT / 00h UTC) aplicando uma EMA de 21 períodos sobre os fechamentos semanais.
+**Resumo:** 12 🟡 Major, 7 🟢 Nit.
 
-#### 4. Ambiguidade do Conceito de "DCA de 30% a -30%"
-* **Severidade:** 🟡 Major
-* **Escopo Afetado:** Linhas 13, 33 e 63 ([`Overview` / `Goals` / `CUJ 1`](file:///c:/Users/gsame/projetos/bitsignal/docs/designs/bitcoin_national_execution_strategy.md#L33-L63))
-* **Descrição da Discrepância:** Na convenção financeira, DCA (*Dollar-Cost Averaging*) denota aportes contínuos e periódicos fracionados no tempo. No entanto, na linha 33 e no CUJ 1 (linha 63: *"O investidor já alocou os 30% de DCA (R$ 30.000) e os 15% de C1"*), o DCA é tratado como uma tranche única (lump sum) acionada quando o preço atinge -30% do ATH. Se for um aporte único, chamá-lo de DCA confunde o desenvolvedor e o usuário; se for contínuo, não foram documentados o intervalo (semanal/mensal) e o tamanho de cada sub-aporte.
-* **Recomendação:** Renomear o estágio para `C0` ("Aporte de Desconto Inicial de -30%") ou descrever a regra de parcelamento temporal caso seja de fato um DCA periódico iniciado em -30%.
+### 🟡 1. As letras A/B/C/D querem dizer coisas diferentes em cada pergunta (l. 15, 95–97, 142–145, 153, 174, 185, 369–378, 845–846)
 
-#### 5. Critério Indefinido de "Confirmação da 50w SMA" no Estágio C4
-* **Severidade:** 🟡 Major
-* **Escopo Afetado:** Linhas 13 e 33 ([`Goals`](file:///c:/Users/gsame/projetos/bitsignal/docs/designs/bitcoin_national_execution_strategy.md#L33))
-* **Descrição da Discrepância:** O documento descreve o gatilho C4 como "15% + saldo restante na confirmação da 50w SMA". Não fica claro se a confirmação exige uma vela semanal fechando *acima* da média de 50 semanas após o mercado ter atingido o fundo, ou se exige rejeição/reteste. Além disso, se o ciclo inverter em C1 (-45%) e voltar a romper a 50w SMA sem ter atingido C2 e C3, a regra de "saldo restante" alocaria 15% + 40% (saldo de C2+C3) = 55% de uma só vez? Isso precisa estar estritamente formalizado.
-* **Recomendação:** Definir matematicamente o gatilho C4: *"Acionado no primeiro fechamento semanal (domingo 21h BRT) acima da 50w SMA após ao menos um degrau de acumulação ter sido executado. O aporte corresponderá a 15% da reserva base somado a quaisquer saldos remanescentes de degraus anteriores (C1..C3) que não foram acionados"*.
+"C" é a escada de venda (Q5), a opção de compras por DCA proporcional (Q9), o armamento por score > 35 (Q5a) e o nome da variante "C". "B" é a normalização com limites altos (Q5), o armamento por score ≥ 60 (Q5a) e o DCA uniforme (Q9), como em "compras B" (l. 97). "A" é o percentil (Q5), o armamento por ATH (Q5a) e a escada por queda (Q9). "D" é o detector, e "D2" é uma normalização que não tem nada a ver com o detector. A tabela da l. 15 já usa "Escada C", "detector D" e "normalização D2" antes de qualquer definição, que só aparece nas l. 143–145.
 
-#### 6. Falta de Diagrama e Regras de Transição de Estado do Ciclo
-* **Severidade:** 🟡 Major
-* **Escopo Afetado:** Linhas 196–197 ([`strategy_state`](file:///c:/Users/gsame/projetos/bitsignal/docs/designs/bitcoin_national_execution_strategy.md#L196-L197))
-* **Descrição da Discrepância:** A tabela SQLite define `active_phase IN ('ACCUMULATION', 'DISTRIBUTION', 'COMPLETED')`. O documento não detalha em qual momento e sob quais condições exatas a máquina de estados migra de `ACCUMULATION` para `DISTRIBUTION`, ou o que ocorre se o Stop 1 for acionado em uma correção de meio de ciclo (a fase retrocede para `ACCUMULATION` ou permanece em `DISTRIBUTION`?).
-* **Recomendação:** Incluir uma tabela ou diagrama de estados finitos no plano arquitetural especificando os eventos de transição entre as fases.
+Sem um glossário ou nomes próprios (ex.: "escada de venda", "armamento por ATH", "DCA uniforme"), o leitor precisa voltar a cada Q para descobrir o que cada letra quer dizer. As frases "C + D com armamento B e com armamento C" (l. 372) e "compras B" (l. 97) são as mais difíceis de ler.
 
-#### 7. Indefinição da Cadência de Execução das Vendas V1–V5 (Fechamento Semanal vs. Alvo Contínuo)
-* **Severidade:** 🟡 Major
-* **Escopo Afetado:** Linhas 14, 33–34, 109 ([`Technical Plan`](file:///c:/Users/gsame/projetos/bitsignal/docs/designs/bitcoin_national_execution_strategy.md#L109))
-* **Descrição da Discrepância:** O documento deixa claro que os *Trailing Stops* avaliam fechamentos semanais dominicais às 21h00 BRT. No entanto, para as saídas V1–V5 em expansão parabólica ($1.0\times$, $1.3\times$, etc.), não é evidente se o investidor deve manter ordens limite pré-cadastradas na corretora (acionadas em tempo real) ou se a avaliação aguarda estritamente o candle dominical das 21h00 BRT. Em topos parabólicos, spikes repentinos podem tocar o múltiplo em uma terça-feira e recuar 30% antes do domingo, perdendo a realização de lucros.
-* **Recomendação:** Explicitar a diretriz: se as vendas V1–V5 dependem exclusivamente da avaliação semanal dominical (para evitar pavios falsos), ou se o sistema deve emitir ordens limites prévias para serem posicionadas no livro.
+### 🟡 2. A composição do score nunca é listada (l. 290 e 202, "seis insumos", §4)
+
+O documento diz "seis insumos, com os pesos e limites atuais lidos do config", mas não diz quais são, nem os pesos, nem como a "normalização atual" funciona (mapeamento linear com corte entre mín. e máx.). O leitor só remonta a lista pelo `config.yaml` (MVRV Z 0,25; preço/SMA200w 0,20; Puell 0,20; Pi Cycle 0,15; RSI semanal 0,10; Hash Ribbon 0,10) ou pelo `normalizer.py`.
+
+Também não fica explicado como o Pi Cycle entra no score: o spread SMA111/(2×SMA350), com o "fundo" forçando 0. O documento só dá a fórmula do Bottom (l. 290). Tudo depende do score (limiares 85/90/93, 20/30 e as regras de intervalo da Q6), e ele não é autocontido.
+
+### 🟡 3. As janelas de calibração e validação se contradizem (l. 63 G3 contra l. 108, 380–381, 890)
+
+G3 diz "calibra até 2017 e testa 2021 e 2022 fora da amostra". O §7 calibra até 2018-12-31. A Q1 afirma que 2019+ "não é amostra independente". Quem lê só os Goals sai com uma ideia de validação que o resto do documento nega.
+
+### 🟡 4. A regra de escolha da Q5b briga com os casos citados (l. 155 e 890)
+
+A Q5b define a severidade de D com casos de mai/2021, set/2024, jan/2022 e nov/2025. Em S6, o dono escolhe "olhando só a janela de calibração (≤ 2018)". O documento não explica como decidir critérios cujos casos de referência estão quase todos fora dessa janela, nem se os casos da Q5b servem só de diagnóstico.
+
+### 🟡 5. A política para dado ausente se contradiz (l. 74, 207–213 G5 e CUJ 2 contra Q6 l. 156–165 e Q7 l. 166–171)
+
+G5 e CUJ 2 falam em veredito "indicativo" quando um insumo é "estimado". Também falam em "a reserva também falhou" e em mostrar "o último valor bom em cache". A Q6/Q7 eliminou estimativas e a reserva fixa: o score passa a ter três estados (`ok`/`intervalo`/`indisponível`), e o Dune não alimenta o modelo. O CUJ 2 descreve o sistema antigo (Dune como fonte, com reserva). O leitor não sabe se "indicativo" corresponde a `intervalo`, nem o que ainda pode ser "estimado".
+
+### 🟡 6. O comportamento do detector quando a CoinMetrics cai se contradiz (l. 171 contra l. 263)
+
+A Q7 diz "Falha da CoinMetrics: … O detector D continua". O §2 diz que, se a CoinMetrics falhar, "score e detector ficam indisponíveis". Como o preço do modelo agora vem só da CoinMetrics (l. 262), a l. 171 parece desatualizada, mas o documento não resolve isso.
+
+### 🟡 7. A fonte do hashrate e os valores de `source` não batem (l. 265–266 contra 267, 274, 686, 698)
+
+O §2 diz que o hashrate vem do Mempool.space. Mas o backtest e `fetch_coinmetrics` buscam `HashRate` na CoinMetrics, e a l. 274 afirma que "painel e backtest usam a mesma fonte". Os exemplos de `source` na l. 266 (`dune`, `yfinance`, `fixed_fallback`) são justamente as fontes que o desenho tira do modelo. A l. 698 define `coinmetrics_live | coinmetrics_frozen`. O leitor não sabe qual é a fonte real do Hash Ribbon nem que valores o selo de origem pode mostrar.
+
+### 🟡 8. O formato da linha do topo se contradiz (l. 127 e 201 contra l. 387)
+
+A Q2 diz que o painel mostra a exposição-alvo, "não uma ordem incremental". O CUJ 1 mostra "VENDER Y% da posição / NADA", que é uma ordem incremental. O §8 mostra "Exposição-alvo: manter X%". O mesmo §8 fala em "Y% da reserva do ciclo", mas a Q9 e a A15 rejeitam explicitamente a reserva "do ciclo" (ela é da campanha e não se renova). São três versões da linha mais importante da tela.
+
+### 🟡 9. Faltam definições de "campanha" e de "declarar" (l. 129, 175, 184, 522)
+
+O documento não define "campanha": quando começa, quem define o valor da reserva-base e onde o usuário o informa. Diz que o caixa cresce "com novas entradas declaradas" ou com aportes declarados, mas o app não tem estado nem entrada de dados (G6, Non-Goals). Fica sem explicação onde e como alguém declara um aporte, tanto no painel quanto no backtest (o `BacktestConfig`, l. 658, não tem campo de aportes).
+
+### 🟡 10. A Q4 continua aberta, mas o desenho já a respondeu (l. 138)
+
+A Q4 pergunta se "a saída por tendência só vale dentro da fase DISTRIBUIR". O §6 já define que D é independente do score e que DISTRIBUIR é *consequência* de `ratchet_sell > 0`. Logo, a pergunta não se aplica mais. Ela não está marcada como decidida nem como obsoleta. O texto também usa ACUMULAR/MANTER/DISTRIBUIR antes de defini-las (definidas só na l. 343).
+
+### 🟡 11. O benchmark "DCA uniforme completo" não é definido no escopo de funcionalidade (l. 97, 185, 512–516)
+
+É o terceiro critério de aprovação, mas o documento não diz quanto se compra, com que frequência, nem se a compra é só na fase ACUMULAR. A frequência (`uniform_weekly = 1/52`) só aparece na l. 657. "Compras B" depende do achado 1 para ser entendido.
+
+### 🟡 12. O que o backtest mostra se contradiz (CUJ 3 l. 217–223 contra Q1 e A19 l. 551–555)
+
+O CUJ 3 promete "acerto sim/não" por evento para 2017/2021/2022, com "definições de acerto registradas no config". A Q1 e a A19 rebaixaram o critério por evento a diagnóstico, e a aprovação é por patrimônio. O CUJ também cita a "comparação com a variante mínima" (A2), que não aparece em nenhuma lista de variantes (l. 369–378, 843–853).
+
+### 🟢 13. O bloco `bands:` não existe (l. 228, CUJ 4)
+
+O S2 (l. 667) cria `sell_ladder`, não `bands:`.
+
+### 🟢 14. Não fica claro se o backtest da aba é pré-calculado ou calculado ao vivo (l. 393, 905 e CUJ 3)
+
+A aba mostra um "resultado pré-calculado do CSV congelado", mas nenhum arquivo do plano gera ou guarda esse resultado. A l. 905 diz que a aba "lê o CSV congelado", o que sugere cálculo na hora.
+
+### 🟢 15. O diagrama cita `historical.py`, mas o plano cria `bitsignal/data/history.py` (l. 247 e 701)
+
+### 🟢 16. "STOP_2" e "C0" são rótulos do código atual e não são explicados (l. 341 e 407)
+
+O leitor deduz pelo contexto ("manda vender 80%" / "manda comprar"), mas uma frase de definição ajudaria.
+
+### 🟢 17. A ordem das regras no pseudocódigo e no S4 é diferente (l. 327–337 contra 762–768)
+
+O pseudocódigo atualiza a catraca antes de checar o reinício e não mostra a regra "com `reset_pending`, `v_d` é ignorado". A lista do S4 tem outra ordem. Na semana do reinício não fica claro se `ratchet_sell` termina em 0 ou em max(V_C, V_D).
+
+### 🟢 18. As "11 divergências" em relação ao brief só são listadas pelo nome (l. 8)
+
+O texto não diz o que cada uma era no brief. Quem não leu `concepts_brief.md` não entende o que mudou. Isso é aceitável como registro histórico, mas a frase pressupõe a leitura do brief.
+
+### 🟢 19. O arquivo do item 42, marcado como "Create/Modify", já é este documento, no mesmo caminho (l. 988)
+
+Parece sobra da etapa de rascunho.
 
 ---
 
-### 🟢 Nits (Melhorias de Clareza e Documentação)
-
-#### 8. Acrônimos Sem Expansão Inline na Primeira Menção
-* **Severidade:** 🟢 Nit
-* **Escopo Afetado:** Linhas 13, 15, 254, 275, 287
-* **Descrição:** Termos como MVRV (Market Value to Realized Value), DARF (Documento de Arrecadação de Receitas Federais), GCAP (Ganhos de Capital), IOF (Imposto sobre Operações Financeiras) e FGC (Fundo Garantidor de Créditos) aparecem sem expansão, elevando a carga cognitiva de leitores novos.
-* **Recomendação:** Expandir a sigla na primeira menção ou incluir um glossário no início do documento.
-
-#### 9. "Emissão de Guia DARF" vs. Relatório de Dados para Preenchimento
-* **Severidade:** 🟢 Nit
-* **Escopo Afetado:** Linhas 15, 39, 210, 315
-* **Descrição:** A expressão "emissão de guia DARF (código 4600)" pode fazer o leitor supor que o BitSignal gera o PDF/código de barras oficial do SicalcWeb via integração com a API da Receita Federal. Na verdade, o sistema calcula o valor e apresenta o relatório de apuração para preenchimento manual pelo usuário.
-* **Recomendação:** Substituir "emissão de guia DARF" por "cálculo e emissão de relatório fiscal de DARF (código 4600)".
-
-#### 10. Exclusão Explícita de Escopo para a IN RFB 1.888/2019
-* **Severidade:** 🟢 Nit
-* **Escopo Afetado:** Linhas 23 e 43–49
-* **Descrição:** A IN 1888/2019 é citada no problema, mas a seção Non-Goals não esclarece que a geração de arquivos mensais para o portal e-CAC está fora de escopo (uma vez que operações em exchanges domiciliadas no Brasil são informadas diretamente pela própria exchange, dispensando o usuário, conforme art. 6º, I da IN 1888).
-* **Recomendação:** Adicionar uma nota em Non-Goals frisando que a obrigação acessória da IN 1888 é suprida pela exchange nacional parceira.
-
-#### 11. Arquivo Autoreferencial na Tabela de Implementação
-* **Severidade:** 🟢 Nit
-* **Escopo Afetado:** Linha 326 ([`Detailed Implementation Plan`](file:///c:/Users/gsame/projetos/bitsignal/docs/designs/bitcoin_national_execution_strategy.md#L326))
-* **Descrição:** A tabela lista `docs/designs/bitcoin_national_execution_strategy.md` com a ação "Criar", sendo que este é o próprio documento em revisão.
-* **Recomendação:** Alterar a ação para "Atualizar / Manter" ou remover a linha para evitar redundância circular.
-
-#### 12. Fluxo de Confirmação Humana (*Human-in-the-Loop*)
-* **Severidade:** 🟢 Nit
-* **Escopo Afetado:** Linhas 68, 89, 319
-* **Descrição:** O CUJ diz: "Após a confirmação da execução pelo operador, o sistema registra a transação...". Deve ficar evidente na arquitetura que a confirmação é manual via comando CLI (`bitsignal strategy-record-tx`) ou tela do Streamlit, confirmando que o Telegram é apenas um despachante unidirecional.
-* **Recomendação:** Acrescentar uma breve menção no texto explicando que o feedback de confirmação é inserido pelo operador através da CLI ou da aba de estratégia no Streamlit.
+**Arquivos lidos pelo revisor:** o documento auditado (1–1011), `config/config.yaml`, `bitsignal/engine/normalizer.py`, `docs/reviews/bitcoin_unified_cycle_model/probe.py`, `bitsignal/ui/app.py` (buscas pontuais) e `concepts_brief.md` (só os cabeçalhos e as seções citadas).

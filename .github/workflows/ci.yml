@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[ui,dev]"
+      - name: Lint
+        run: ruff check bitsignal tests
+      - name: Tests (total coverage >= 70%)
+        run: pytest -q --cov=bitsignal --cov-fail-under=70
+      - name: Tests (engine and backtest coverage >= 90%)
+        run: pytest -q --cov=bitsignal/engine --cov=bitsignal/backtest --cov-fail-under=90

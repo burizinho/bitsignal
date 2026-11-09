@@ -1,0 +1,16 @@
+{
+  "fetched_at": "2026-11-09T19:01:05.892026+00:00",
+  "gaps": {},
+  "last_date": "2026-11-08",
+  "license": "CC BY-NC 4.0",
+  "metrics": {
+    "CapMVRVCur": "mvrv_ratio",
+    "CapMrktCurUSD": "mc",
+    "HashRate": "hashrate",
+    "IssTotUSD": "iss_usd",
+    "PriceUSD": "price"
+  },
+  "rows": 5958,
+  "sha256": "ed34e12de88cf2b44c0188131d7e0644363dbac882f650236ed1bf1eeb885372",
+  "source_url": "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
+}

@@ -1,1 +1,0 @@
-"""Alerting layer for BitSignal."""

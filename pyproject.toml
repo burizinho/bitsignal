@@ -5,31 +5,30 @@ build-backend = "hatchling.build"
 [project]
 name = "bitsignal"
 version = "0.1.0"
-description = "Autonomous quantitative Bitcoin macro cycle sentinel"
+description = "Painel do modelo de ciclo unificado do Bitcoin (Fase 1, experimental)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Project Lead" }]
 dependencies = [
-    "pydantic>=2.5.0",
-    "requests>=2.31.0",
-    "pandas>=2.1.0",
-    "numpy>=1.26.0",
-    "tenacity>=8.2.0",
-    "python-dotenv>=1.0.0",
-    "pyyaml>=6.0.1",
-    "yfinance>=0.2.30",
+    "pydantic==2.14.3",
+    "requests==2.34.2",
+    "pandas==3.1.1",
+    "numpy==2.4.6",
+    "python-dotenv==1.2.4",
+    "pyyaml==6.0.3",
+    "yfinance==1.8.0",
 ]
 
 [project.optional-dependencies]
 ui = [
-    "streamlit>=1.30.0",
-    "plotly>=5.18.0",
+    "streamlit==1.67.0",
+    "plotly==7.1.0",
 ]
 dev = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "ruff>=0.1.5",
+    "pytest==9.2.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.17.4",
 ]
 
 [project.scripts]
@@ -39,7 +38,15 @@ bitsignal = "bitsignal.cli:main"
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.lint]
+# Explicit rule set (ruff's former default), so a ruff upgrade does not change what CI checks.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+# No coverage in addopts: freeze-params runs a subset of the tests. CI passes --cov explicitly.
+[tool.coverage.report]
+omit = ["bitsignal/ui/*"]
 

@@ -1,145 +1,118 @@
-# ⚡ BitSignal: Bitcoin Macro Cycle Sentinel
+# BitSignal — modelo de ciclo unificado do Bitcoin
 
-BitSignal is an autonomous, quantitative sentinel designed to track Bitcoin macro cycle turns without emotional bias. Operating on a daily batch cadence (UTC 00:05), it collects market price, network mining stats, and on-chain valuation ratios from free public sources, computing a continuous **Composite Cycle Score (0 to 100)** via clamped piecewise linear normalization.
+Painel **só de leitura** que mostra, para a última semana fechada, em que fase do ciclo o Bitcoin está
+e quanto o modelo sugere ter vendido ou comprado até ali. Não envia alertas, não registra operações e
+não faz análise fiscal: os resultados são brutos, e as operações reais ficam na planilha do usuário.
 
-When market conditions reach extreme cyclical overheating (Score $\ge 80$), BitSignal issues tiered Telegram push alerts with actionable runbooks to orchestrate staged divestment of cold-storage holdings (up to 40% maximum exit, preserving a permanent 60% sovereign reserve). Conversely, during generational capitulation troughs (Score $\le 20$), it signals staged dollar-cost averaging (DCA) accumulation.
+> **Status: experimental.** A avaliação financeira (Q1) foi gravada uma única vez, em 2026-11-09, e o
+> modelo **não** passou em todos os critérios (detalhes em [Validação](#validação)). Os percentuais do
+> painel são referências do modelo, não ordens.
 
----
+O design completo está em [docs/designs/bitcoin_unified_cycle_model.md](docs/designs/bitcoin_unified_cycle_model.md).
 
-## 🏗️ Architecture & Core Components
+## O que o painel mostra
 
-```mermaid
-flowchart LR
-    A["Free Public Endpoints<br>(Binance, Mempool, Dune/GitHub)"] --> B["bitsignal.ingestion<br>(Pydantic V2 Validation)"]
-    B --> C[("SQLite WAL Database<br>(daily_metrics, daily_scores)")]
-    C --> D["bitsignal.integrity<br>(36h/48h Circuit Breaker)"]
-    D --> E["bitsignal.engine<br>(Clamped Linear Normalizer)"]
-    E --> F["bitsignal.alerts<br>(Multi-Tier Hysteresis)"]
-    F --> G["Telegram Bot Dispatcher<br>(Staged Exit Runbooks)"]
-```
+* **Linha do topo:** semana fechada, fase (ACUMULAR, MANTER ou DISTRIBUIR), venda acumulada-alvo no
+  ciclo (% da posição-base), compra da semana (% da reserva-base) e o motivo.
+* **Insumos:** valor e estado de cada indicador (presente, aquecimento ou ausente) e o score.
+* **Detector de reversão:** armamento, nível atual e episódios.
+* **Ciclo:** gráfico de preço com as fases e o registro de eventos do ciclo atual.
+* **Conferência com o Dune** (opcional): compara o último dado do CoinMetrics com uma consulta do Dune.
+* **Backtest:** curvas de patrimônio do modelo, de comprar e segurar e do DCA uniforme, com os
+  critérios gravados.
 
-* **Zero Recurring Data Cost**: Consumes public Binance endpoints (with Yahoo Finance fallback), Mempool.space API, and public on-chain execution queries.
-* **Integrity Monitor & Circuit Breaker**: Audits metric staleness with a 36-hour fresh threshold. Imputes a neutral baseline ($S_i = 50$) for degraded metrics ($\le 20\%$ missing weight); freezes phase alerts and emits emergency diagnostics if missing weight exceeds 20%.
-* **Multi-Tier Hysteresis**: Prevents alert fatigue using deadbands (Tier 1 resets $<75$; Tier 2 re-arms $<82$; Tier 3 re-arms $<87$; Bottom resets $>25$).
-* **Sovereign Persistence**: Lightweight SQLite in Write-Ahead Logging (WAL) mode (`./data/bitsignal.db`).
+Se os dados estiverem desatualizados (mais de 9 dias) ou a fonte estiver fora do ar, o painel não
+mostra veredito e oferece "Tentar de novo".
 
----
+## O modelo
 
-## 📊 Indicator Calibration Matrix
+Tudo roda sobre fechamentos semanais (domingo, UTC). Uma semana só entra depois de fechada. Nenhum
+dado ausente é preenchido.
 
-| Indicator | Weight ($w_i$) | Bottom ($S_i = 0$) | Top ($S_i = 100$) | Formulation / Direction |
-| :--- | :--- | :--- | :--- | :--- |
-| **MVRV Z-Score** | 25% | $Z \le 0.15$ | $Z \ge 5.00$ | Direct: higher = overheated valuation |
-| **200-Week SMA Ratio** | 20% | $\text{Price} / \text{SMA}_{200w} \le 1.0$ | $\text{Price} / \text{SMA}_{200w} \ge 3.5$ | Direct: price extension over baseline |
-| **Puell Multiple** | 20% | $\text{Puell} \le 0.45$ | $\text{Puell} \ge 2.20$ | Direct: miner revenue multiple |
-| **Pi Cycle Top / Bottom** | 15% | Bottom cross active ($S = 0$) | Top cross active ($S = 100$) | Top Spread: $R_{\text{top}} = \frac{\text{SMA}_{111}}{2 \times \text{SMA}_{350}}$ clamped $[0.70, 1.00]$ |
-| **Weekly RSI (14p)** | 10% | $\text{RSI} \le 32$ | $\text{RSI} \ge 80$ | Direct: rolling 7-day sampled RSI |
-| **Hash Ribbon** | 10% | Buy recovery cross ($S = 10$) | Normal state ($S = 50$) | Discrete: `NORMAL=50`, `CAPITULATION=20`, `BUY_RECOVERY=10` |
+1. **Score de valuation (0–100):** média ponderada de MVRV Z (25%), preço/SMA200 semanas (20%),
+   Puell (20%), Pi Cycle (15%), RSI semanal de 14 (10%) e Hash Ribbon (10%), cada um normalizado
+   entre um mínimo e um máximo fixos. MVRV e Puell são obrigatórios; se faltar mais de 20% do peso, o
+   score fica indisponível. Com insumos ausentes, o score vira um intervalo (`score_min`–`score_max`).
+2. **Escada de venda:** `score_min` ≥ 85 / 90 / 93 → venda acumulada de 5% / 15% / 30% da
+   posição-base.
+3. **Detector de reversão** (independente do score): fica armado por 52 semanas depois de uma nova
+   máxima histórica. Dispara com 2 fechamentos abaixo da SMA30 semanas e preço ≤ 80% da máxima de 52
+   semanas. Níveis: 10% no disparo, 25% com 2 fechamentos abaixo da SMA50 semanas, 50% quando, além
+   disso, o preço chega a ≤ 60% da máxima de 52 semanas.
+4. **Catraca e teto:** a venda acumulada-alvo só sobe dentro do ciclo:
+   `min(50%, max(catraca, escada, detector))`. Os outros 50% da posição-base nunca são vendidos.
+5. **Ciclo e reinício em duas etapas:** o reinício é armado com `score_max` ≤ 20 por 2 semanas e só
+   vale com `score_min` ≥ 30 por 2 semanas e o detector em 0. Aí começa um ciclo novo e a catraca
+   volta a 0.
+6. **Compras (DCA pelo score):** 2% da reserva-base por semana com `score_max` ≤ 20, 4% com ≤ 10. A
+   reserva não é renovada, e o caixa das vendas fica em caixa.
 
----
+Os parâmetros estão em [config/config.yaml](config/config.yaml) e foram congelados em
+[config/frozen/params_2026-11-09.yaml](config/frozen/params_2026-11-09.yaml).
 
-## 📋 Staged Cold-Storage Runbooks
+## Fontes de dados
 
-* **Tier 1 (Score 80–84)**: Stage **20% divestment tranche** from cold storage to intermediate staging wallet. Check mempool fee rates.
-* **Tier 2 (Score 85–89)**: Stage additional **10% tranche** (**30% cumulative exit**). Deposit to institutional exchange order book with limit orders.
-* **Tier 3 (Score $\ge 90$)**: Stage final **10% tranche** (**40% cumulative exit maximum**). Execute final euphoria scale-out.
-* **Sovereign Baseline**: **60% of cold storage is permanently retained** as a non-divestible reserve.
-* **Bottom DCA (Score $\le 20$)**: Initiate weekly dollar-cost averaging accumulation.
+* **CoinMetrics Community API** (sem chave, licença CC BY-NC 4.0): fonte única dos insumos do modelo
+  (`PriceUSD`, `CapMrktCurUSD`, `CapMVRVCur`, `IssTotUSD`, `HashRate`). O histórico usado pelo backtest
+  fica congelado em `data/historical/btc_coinmetrics.csv`, com o hash conferido em cada leitura.
+* **Dune** (opcional): só conferência. Configure `DUNE_API_KEY` e `DUNE_QUERY_ID` no `.env` (veja
+  `.env.example`). Sem eles, a conferência é omitida e o modelo funciona igual.
+* **Yahoo Finance** (yfinance): só o preço à vista exibido no painel; não entra no modelo.
 
----
+## Instalação
 
-## 🚀 Installation & Setup
+Requer Python 3.11 ou mais novo.
 
-### 1. Prerequisites
-* Python 3.11+
-* Git
-
-### 2. Install Package
 ```bash
-# Clone and enter directory
-git clone https://github.com/yourusername/BitSignal.git
-cd BitSignal
-
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install core CLI package
-pip install -e .
-
-# Or install with UI and development tools:
 pip install -e ".[ui,dev]"
 ```
 
-### 3. Environment Variables
-Copy the template and configure your secrets:
+O `requirements.txt` (usado pelo Streamlit Cloud) instala `-e .[ui]`.
+
+## Comandos
+
+| Comando | O que faz |
+| :--- | :--- |
+| `bitsignal ui` | Abre o painel (`streamlit run streamlit_app.py`). |
+| `bitsignal evaluate` | Busca os dados no CoinMetrics e imprime o veredito da última semana fechada. |
+| `bitsignal backtest` | Backtest offline na janela de calibração (até 2018-12-31), sem critérios. |
+| `bitsignal backtest --window development` | Janela de desenvolvimento (2019+): mostra os critérios gravados ao lado do recálculo. Exige parâmetros congelados com o mesmo `model_hash`. |
+| `bitsignal fetch-history` | Baixa o histórico do CoinMetrics e grava um novo CSV congelado. |
+| `bitsignal freeze-params` | Congela os parâmetros num arquivo novo (recusa se os testes técnicos falharem ou se o arquivo existir). |
+
+`backtest --window development --record` grava a avaliação uma única vez e já foi usado; rodar de novo
+é recusado.
+
+## Validação
+
+* **Janela de calibração:** até 2018-12-31. É onde os parâmetros podem ser examinados.
+* **Janela de desenvolvimento (2019+):** de 2019 até o congelamento. É validação histórica feita depois
+  de ver esses dados, **não** uma amostra independente. Os critérios foram gravados uma vez, no arquivo
+  congelado.
+
+Critérios (Q1) e resultado gravado, rebaseados em 2019-01-01:
+
+| Critério | Meta | Resultado | Passou |
+| :--- | :--- | :--- | :--- |
+| Patrimônio final vs. comprar e segurar | ≥ 0,90 | 0,325 | Não |
+| Melhora da queda máxima vs. comprar e segurar | ≥ 10 p.p. | 31,35 p.p. | Sim |
+| Patrimônio final vs. DCA uniforme completo | ≥ 1,00 | 1,016 | Sim |
+
+Por isso o painel mostra o selo "Experimental". Os parâmetros não foram recalibrados depois da
+avaliação; mudar qualquer um deles exige um novo design e um novo congelamento.
+
+## Fases
+
+* **Fase 1 (implementada):** modelo único, painel só de leitura, backtest essencial com dois
+  benchmarks e congelamento.
+* **Fase 2 (proposta):** variantes de comparação no backtest. Tem design próprio e não foi iniciada.
+
+## Desenvolvimento
+
 ```bash
-cp .env.example .env
-```
-Edit `.env`:
-```ini
-TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjkLMNOP"
-TELEGRAM_CHAT_ID="987654321"
-DATABASE_PATH="./data/bitsignal.db"
+ruff check bitsignal tests
+pytest -q --cov=bitsignal --cov-fail-under=70
+pytest -q --cov=bitsignal/engine --cov=bitsignal/backtest --cov-fail-under=90
 ```
 
----
-
-## 💻 CLI Usage
-
-### Initialize Database
-```bash
-bitsignal db-init
-```
-
-### Run Daily Pipeline (Dry Run)
-```bash
-bitsignal run-daily --dry-run
-```
-
-### Run Daily Pipeline (Production Mode with Telegram Push)
-```bash
-bitsignal run-daily
-```
-
-### Run Phase 1.5 Historical Backtest
-```bash
-bitsignal backtest --start 2012-01-01
-```
-
-### Launch Interactive Streamlit Dashboard
-```bash
-bitsignal ui
-# or: streamlit run bitsignal/ui/app.py
-```
-
----
-
-## ⏰ Automated Daily Execution (OS Cron)
-
-BitSignal is engineered as a lean batch job that executes once daily in $<15$ seconds. Configure your operating system's scheduler to run at **UTC 00:05** (immediately following daily candle close):
-
-### Linux / macOS (`crontab -e`)
-```cron
-5 0 * * * cd /path/to/BitSignal && /path/to/BitSignal/.venv/bin/bitsignal run-daily >> /path/to/BitSignal/daily.log 2>&1
-```
-
-### Windows (Task Scheduler)
-Create a daily task triggering at `00:05 UTC` executing:
-* **Program/script**: `D:\Projetos Gui\BitSignal\.venv\Scripts\bitsignal.exe`
-* **Arguments**: `run-daily`
-* **Start in**: `D:\Projetos Gui\BitSignal`
-
----
-
-## 🧪 Testing & Verification
-
-Run the automated test suite with coverage:
-```bash
-pytest -v --cov=bitsignal --cov-report=term-missing
-```
-
----
-
-## 📄 License
-MIT License.
+Os testes rodam sem rede. O CI (`.github/workflows/ci.yml`) roda os mesmos comandos em Python 3.11.
