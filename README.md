@@ -77,6 +77,7 @@ O `requirements.txt` (usado pelo Streamlit Cloud) instala `-e .[ui]`.
 | `bitsignal evaluate` | Busca os dados no CoinMetrics e imprime o veredito da última semana fechada. |
 | `bitsignal backtest` | Backtest offline na janela de calibração (até 2018-12-31), sem critérios. |
 | `bitsignal backtest --window development` | Janela de desenvolvimento (2019+): mostra os critérios gravados ao lado do recálculo. Exige parâmetros congelados com o mesmo `model_hash`. |
+| `bitsignal record-verdict` | Grava o veredito da última semana fechada no registro semanal (veja abaixo). |
 | `bitsignal fetch-history` | Baixa o histórico do CoinMetrics e grava um novo CSV congelado. |
 | `bitsignal freeze-params` | Congela os parâmetros num arquivo novo (recusa se os testes técnicos falharem ou se o arquivo existir). |
 
@@ -100,6 +101,23 @@ Critérios (Q1) e resultado gravado, rebaseados em 2019-01-01:
 
 Por isso o painel mostra o selo "Experimental". Os parâmetros não foram recalibrados depois da
 avaliação; mudar qualquer um deles exige um novo design e um novo congelamento.
+
+## Registro semanal (validação com dados futuros)
+
+A janela 2019+ já foi vista, então nenhuma avaliação feita nela é independente. Para juntar
+evidência que não seja retrospectiva, o workflow `.github/workflows/weekly-verdict.yml` roda toda
+segunda e terça às 12:00 UTC, executa `bitsignal record-verdict` e commita uma linha por semana
+fechada em `data/verdicts/weekly_verdicts.csv`:
+
+* semana, data da gravação, fase, venda acumulada-alvo, compra, score (e intervalo), estado do
+  score, nível do detector, reinício pendente, início do ciclo, preço, `data_as_of`, `model_hash`
+  e motivo.
+* Uma semana já gravada nunca é reescrita, mesmo que o CoinMetrics revise os dados depois.
+* Com dados desatualizados ou fonte fora do ar, o comando falha e não grava nada; a falha aparece
+  na aba Actions do GitHub.
+
+Não é registro das suas operações nem envia alerta: é só o histórico do que o modelo disse, na
+hora em que disse.
 
 ## Fases
 

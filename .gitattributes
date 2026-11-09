@@ -4,3 +4,4 @@ data/historical/*.csv -text
 data/historical/*.json -text
 tests/golden/*.json -text
 config/frozen/*.yaml -text
+data/verdicts/*.csv -text
