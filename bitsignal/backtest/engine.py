@@ -131,3 +131,49 @@ def run_backtest(
         weeks=weeks,
         sensitivities=sens,
     )
+
+
+def _variant_entry(history: MarketHistory, vcfg: Config, window: Window) -> Dict:
+    core = _run_core(history, vcfg, window)
+    if core is None:
+        return {"applicable": False}
+    result, _, end, strat, bnh, uni = core
+    trades = strat.trades
+    done = trades[trades["status"] == "done"] if len(trades) else trades
+    last = strat.equity.dropna().iloc[-1]
+    entry = {
+        "applicable": True,
+        "strategy": _summary(strat),
+        "bnh": _summary(bnh),
+        "uniform": _summary(uni),
+        "btc_end": float(last["btc"]),
+        "cash_end": float(last["cash"]),
+        "n_sells": int((done["side"] == "sell").sum()) if len(done) else 0,
+        "n_cycles": sum(1 for e in result.events if e.type.value == "CYCLE_START" and strat.start < e.date <= end),
+    }
+    if window == "development":
+        entry["criteria"] = m.criteria(
+            strat.equity["equity_usd"], bnh.equity["equity_usd"], uni.equity["equity_usd"], vcfg
+        )
+    return entry
+
+
+def run_variants(history: MarketHistory, cfg: Config, window: Window = "calibration",
+                 frozen: Optional[FrozenParams] = None) -> Dict[str, Dict[str, Dict]]:
+    """Phase 2: the default model and every catalog variant on the same window (comparison only).
+
+    Same guard as ``run_backtest`` for the development window (frozen file with the same hash);
+    the variants themselves are never frozen and never recorded.
+    """
+    from bitsignal.backtest.variants import POST_HOC, pre_registered
+
+    if window == "development":
+        if frozen is None or frozen.model_hash != model_hash(cfg):
+            raise ValueError("window='development' requires the frozen parameters of the default model")
+    elif window != "calibration":
+        raise ValueError(f"unknown window {window!r}")
+    out: Dict[str, Dict[str, Dict]] = {"default": {"default": _variant_entry(history, cfg, window)}}
+    out["pre_registered"] = {n: _variant_entry(history, apply_overrides(cfg, o), window)
+                             for n, o in pre_registered(cfg).items()}
+    out["post_hoc"] = {n: _variant_entry(history, apply_overrides(cfg, o), window) for n, o in POST_HOC.items()}
+    return out

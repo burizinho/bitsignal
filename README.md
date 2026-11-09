@@ -77,6 +77,7 @@ O `requirements.txt` (usado pelo Streamlit Cloud) instala `-e .[ui]`.
 | `bitsignal evaluate` | Busca os dados no CoinMetrics e imprime o veredito da última semana fechada. |
 | `bitsignal backtest` | Backtest offline na janela de calibração (até 2018-12-31), sem critérios. |
 | `bitsignal backtest --window development` | Janela de desenvolvimento (2019+): mostra os critérios gravados ao lado do recálculo. Exige parâmetros congelados com o mesmo `model_hash`. |
+| `bitsignal backtest --variants [--window development]` | Fase 2: o modelo padrão e as variantes de comparação lado a lado. Só diagnóstico sobre dados já vistos; nunca grava nada. |
 | `bitsignal record-verdict` | Grava o veredito da última semana fechada no registro semanal (veja abaixo). |
 | `bitsignal fetch-history` | Baixa o histórico do CoinMetrics e grava um novo CSV congelado. |
 | `bitsignal freeze-params` | Congela os parâmetros num arquivo novo (recusa se os testes técnicos falharem ou se o arquivo existir). |
@@ -123,7 +124,9 @@ hora em que disse.
 
 * **Fase 1 (implementada):** modelo único, painel só de leitura, backtest essencial com dois
   benchmarks e congelamento.
-* **Fase 2 (proposta):** variantes de comparação no backtest. Tem design próprio e não foi iniciada.
+* **Fase 2 (implementada, diagnóstico):** variantes de comparação no backtest
+  ([design e resultados](docs/designs/bitcoin_cycle_phase2_variants.md)). Não substituem o modelo
+  padrão.
 
 ## Desenvolvimento
 

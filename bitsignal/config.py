@@ -198,6 +198,31 @@ class UiConfig(_Strict):
     retry_cooldown_s: int = Field(ge=0)
 
 
+class MinimalConfig(_Strict):
+    """Pre-registered ``minimal`` model (Phase 2 design, D4). Comparison only."""
+
+    distribute_ratio: float = 3.5  # price / SMA200w
+    picycle_top_spread: float = 1.0  # SMA111 / (2 x SMA350)
+    sell_step: float = 0.15  # per trigger, on the cycle base position
+    sell_cap: float = 0.30
+    buy_first_week: float = 0.40  # of the base reserve
+    buy_dd50: float = 0.30
+    buy_dd70: float = 0.30
+
+
+class ComparisonConfig(_Strict):
+    """Comparison-only options (Phase 2). Outside ``model_hash``; the dashboard rejects any
+    non-default value (``validate_for_panel``)."""
+
+    model: Literal["default", "minimal"] = "default"
+    detector_enabled: bool = True  # False: level always 0 (also stops blocking the reset; D2)
+    detector_arming: Literal["ath", "score60", "score35"] = "ath"
+    leftover_on_reset: bool = False  # buy all remaining cash when a new cycle starts
+    buy_sizing: Literal["reserve", "cash"] = "reserve"  # % of the base reserve or of current cash
+    floor_base: Literal["cycle", "initial"] = "cycle"  # floor on the cycle base or the initial BTC
+    minimal: MinimalConfig = Field(default_factory=MinimalConfig)
+
+
 class Config(_Strict):
     score: ScoreConfig
     sell_ladder: List[Tuple[float, float]]
@@ -208,6 +233,7 @@ class Config(_Strict):
     backtest: BacktestConfig
     data: DataConfig
     ui: UiConfig
+    comparison: ComparisonConfig = Field(default_factory=ComparisonConfig)
 
     @field_validator("sell_ladder")
     @classmethod
@@ -372,8 +398,12 @@ def write_frozen_params(path: Union[str, Path], frozen: FrozenParams) -> Path:
 def validate_for_panel(cfg: Config) -> None:
     """Reject comparison-only options in the config used for the dashboard verdict.
 
-    In Phase 1 the only comparison option in the schema is ``buys.mode = "uniform"``
-    (used by the uniform benchmark through ``apply_overrides``).
+    Comparison options: ``buys.mode = "uniform"`` (uniform benchmark) and the whole
+    ``comparison`` block (Phase 2 variants).
     """
     if cfg.buys.mode != "score_dca":
         raise ConfigError("buys.mode", "opção só para backtest")
+    default = ComparisonConfig().model_dump()
+    for key, value in cfg.comparison.model_dump().items():
+        if value != default[key]:
+            raise ConfigError(f"comparison.{key}", "opção só para backtest")

@@ -50,6 +50,7 @@ def simulate(
 ) -> Simulation:
     """Simulate the continuous portfolio from ``start`` (a W-SUN Sunday) until ``end``."""
     bt = cfg.backtest
+    cmp_ = cfg.comparison  # Phase 2 options; defaults reproduce the model exactly
     fee = bt.fee
     start_ts = pd.Timestamp(start)
     end_ts = pd.Timestamp(end) if end is not None else daily_price.dropna().index[-1]
@@ -58,6 +59,7 @@ def simulate(
     btc = float(bt.initial_btc)
     reserve_usd = float(bt.reserve_btc_equiv) * float(daily_price.loc[start_ts])
     cash = reserve_usd
+    floor_btc = cfg.cap.floor * btc  # floor_base = "initial": never sell below this
 
     cycle_id = int(weeks["cycle_id"].iloc[0]) if len(weeks) else 0
     base_btc = btc
@@ -68,7 +70,8 @@ def simulate(
     changes = [(start_ts, btc, cash)]
 
     for sunday, row in weeks.iterrows():
-        if int(row["cycle_id"]) != cycle_id:  # a new cycle starts at this Sunday's close
+        new_cycle = int(row["cycle_id"]) != cycle_id
+        if new_cycle:  # a new cycle starts at this Sunday's close
             cycle_id = int(row["cycle_id"])
             base_btc = btc
             baseline = 0.0
@@ -76,7 +79,14 @@ def simulate(
 
         target_btc = max(0.0, float(row["ratchet_sell"]) - baseline) * base_btc
         q_wanted = target_btc - sold_in_cycle
-        usd_wanted = float(row["buy_pct"]) * reserve_usd
+        if cmp_.floor_base == "initial" and q_wanted > EPS:
+            allowed = min(q_wanted, max(0.0, btc - floor_btc))
+            sold_in_cycle += q_wanted - allowed  # blocked by the floor: dropped, never deferred
+            q_wanted = allowed
+        sizing_base = cash if cmp_.buy_sizing == "cash" else reserve_usd
+        usd_wanted = float(row["buy_pct"]) * sizing_base
+        if new_cycle and cmp_.leftover_on_reset:
+            usd_wanted = cash
         if q_wanted <= EPS and usd_wanted <= EPS:
             continue
 
