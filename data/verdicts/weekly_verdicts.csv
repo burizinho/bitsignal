@@ -1,0 +1,2 @@
+week,recorded_at,phase,sell_target,buy_pct,score,score_min,score_max,score_status,detector_level,reset_pending,cycle_start_date,price_usd,data_as_of,model_hash,reason
+2026-11-08,2026-11-09T22:17:09Z,ACCUMULATE,0.2500,0.0200,15.49,15.49,15.49,OK,0,true,2023-11-12,74967.72,2026-11-08,15d1e484a6f4ac7954877964936f890ac4863313734c204c27992f50786080d2,reinício armado em 2025-12-14; score_max 15.5 → compra 2%
