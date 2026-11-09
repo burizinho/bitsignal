@@ -65,3 +65,21 @@ def test_rerun_keeps_rendering_page():
     assert first_titles and rerun_titles == first_titles
     assert any("Semana fechada" in m for m in first_md)
     assert any("Semana fechada" in m for m in rerun_md)
+
+
+def test_app_py_as_main_file_renders_page():
+    """Cloud's main file can be bitsignal/ui/app.py itself: running it directly must render."""
+    pytest.importorskip("streamlit")
+    from streamlit.testing.v1 import AppTest
+
+    old_cwd = os.getcwd()
+    os.chdir(ROOT)
+    try:
+        # No network: the page title must render before any data is fetched.
+        with mock.patch("bitsignal.data.coinmetrics.fetch_coinmetrics", side_effect=AssertionError("network")):
+            at = AppTest.from_file(str(ROOT / "bitsignal" / "ui" / "app.py"), default_timeout=120)
+            at.run()
+    finally:
+        os.chdir(old_cwd)
+
+    assert [t.value for t in at.title], "running app.py directly rendered nothing"
