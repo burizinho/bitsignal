@@ -4,9 +4,10 @@ Painel **só de leitura** que mostra, para a última semana fechada, em que fase
 e quanto o modelo sugere ter vendido ou comprado até ali. Não envia alertas, não registra operações e
 não faz análise fiscal: os resultados são brutos, e as operações reais ficam na planilha do usuário.
 
-> **Status: experimental.** A avaliação financeira (Q1) foi gravada uma única vez, em 2026-11-09, e o
-> modelo **não** passou em todos os critérios (detalhes em [Validação](#validação)). Os percentuais do
-> painel são referências do modelo, não ordens.
+> **Status: experimental.** O painel mostra o **modelo v2** (Fase 3), que é o v1 mais uma regra: no
+> reinício de ciclo, comprar com todo o caixa disponível. O v1 foi avaliado uma única vez e **não**
+> passou em todos os critérios (detalhes em [Validação](#validação)); o v2 só é avaliado com dados
+> futuros. Os percentuais do painel são referências do modelo, não ordens.
 
 O design completo está em [docs/designs/bitcoin_unified_cycle_model.md](docs/designs/bitcoin_unified_cycle_model.md).
 
@@ -44,11 +45,14 @@ dado ausente é preenchido.
 5. **Ciclo e reinício em duas etapas:** o reinício é armado com `score_max` ≤ 20 por 2 semanas e só
    vale com `score_min` ≥ 30 por 2 semanas e o detector em 0. Aí começa um ciclo novo e a catraca
    volta a 0.
-6. **Compras (DCA pelo score):** 2% da reserva-base por semana com `score_max` ≤ 20, 4% com ≤ 10. A
-   reserva não é renovada, e o caixa das vendas fica em caixa.
+6. **Compras (DCA pelo score):** 2% da reserva-base por semana com `score_max` ≤ 20, 4% com ≤ 10.
+7. **Compra no reinício (só no v2):** na semana em que um ciclo novo começa, comprar com todo o caixa
+   disponível, incluindo o produto das vendas do ciclo anterior. No v1 esse caixa ficava parado.
 
-Os parâmetros estão em [config/config.yaml](config/config.yaml) e foram congelados em
-[config/frozen/params_2026-11-09.yaml](config/frozen/params_2026-11-09.yaml).
+| Modelo | Config | Congelado em | Avaliação |
+| :--- | :--- | :--- | :--- |
+| v2 (painel) | [config/config.yaml](config/config.yaml) | [params_v2_2026-11-09.yaml](config/frozen/params_v2_2026-11-09.yaml) | só com dados futuros (`forward-eval`) |
+| v1 | [config/config_v1.yaml](config/config_v1.yaml) | [params_2026-11-09.yaml](config/frozen/params_2026-11-09.yaml) | 2019+, gravada (não aprovado) |
 
 ## Fontes de dados
 
@@ -78,7 +82,8 @@ O `requirements.txt` (usado pelo Streamlit Cloud) instala `-e .[ui]`.
 | `bitsignal backtest` | Backtest offline na janela de calibração (até 2018-12-31), sem critérios. |
 | `bitsignal backtest --window development` | Janela de desenvolvimento (2019+): mostra os critérios gravados ao lado do recálculo. Exige parâmetros congelados com o mesmo `model_hash`. |
 | `bitsignal backtest --variants [--window development]` | Fase 2: o modelo padrão e as variantes de comparação lado a lado. Só diagnóstico sobre dados já vistos; nunca grava nada. |
-| `bitsignal record-verdict` | Grava o veredito da última semana fechada no registro semanal (veja abaixo). |
+| `bitsignal record-verdict [--config …]` | Grava o veredito da última semana fechada no registro semanal do modelo (veja abaixo). |
+| `bitsignal forward-eval` | Avaliação do v2 com dados futuros (Fase 3): v2 contra v1, comprar e segurar e DCA uniforme desde o congelamento do v2. Só exibe. |
 | `bitsignal fetch-history` | Baixa o histórico do CoinMetrics e grava um novo CSV congelado. |
 | `bitsignal freeze-params` | Congela os parâmetros num arquivo novo (recusa se os testes técnicos falharem ou se o arquivo existir). |
 
@@ -107,8 +112,11 @@ avaliação; mudar qualquer um deles exige um novo design e um novo congelamento
 
 A janela 2019+ já foi vista, então nenhuma avaliação feita nela é independente. Para juntar
 evidência que não seja retrospectiva, o workflow `.github/workflows/weekly-verdict.yml` roda toda
-segunda e terça às 12:00 UTC, executa `bitsignal record-verdict` e commita uma linha por semana
-fechada em `data/verdicts/weekly_verdicts.csv`:
+segunda e terça às 12:00 UTC, executa `bitsignal record-verdict` para cada modelo e commita uma
+linha por semana fechada em `data/verdicts/weekly_verdicts.csv` (v1) e
+`data/verdicts/weekly_verdicts_v2.csv` (v2). Um arquivo nunca mistura modelos: o comando recusa
+gravar se o `model_hash` não for o do arquivo. Na semana de reinício do v2, `buy_pct` vale `all_cash`.
+Colunas:
 
 * semana, data da gravação, fase, venda acumulada-alvo, compra, score (e intervalo), estado do
   score, nível do detector, reinício pendente, início do ciclo, preço, `data_as_of`, `model_hash`
@@ -124,6 +132,9 @@ hora em que disse.
 
 * **Fase 1 (implementada):** modelo único, painel só de leitura, backtest essencial com dois
   benchmarks e congelamento.
+* **Fase 3 (implementada, em avaliação):** modelo v2 com compra no reinício
+  ([design](docs/designs/bitcoin_cycle_phase3_reinvestment.md)). A janela de avaliação vai do
+  congelamento (2026-11-09) até o primeiro reinício depois de uma fase DISTRIBUIR, ou 2030-12-31.
 * **Fase 2 (implementada, diagnóstico):** variantes de comparação no backtest
   ([design e resultados](docs/designs/bitcoin_cycle_phase2_variants.md)). Não substituem o modelo
   padrão.

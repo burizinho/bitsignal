@@ -69,7 +69,7 @@ backtest:
     - {name: topo_2021_nov, kind: top, window: [2021-10-01, 2021-12-15]}
     - {name: fundo_2022, kind: bottom, window: [2022-06-01, 2023-01-31]}
     - {name: topo_2025, kind: top, window: [2025-09-01, 2025-11-30]}
-  frozen_params: null  # preenchido pelo freeze-params do v2; fora do model_hash
+  frozen_params: config/frozen/params_v2_2026-11-09.yaml  # preenchido pelo freeze-params do v2; fora do model_hash
 
 data:
   csv_path: data/historical/btc_coinmetrics.csv

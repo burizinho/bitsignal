@@ -59,6 +59,10 @@ def cmd_backtest(args):
     if record:
         _write_approval(cfg, frozen, report)
         return
+    if args.window == "development" and frozen is not None and frozen.approval is None:
+        print("")
+        print("Modelo sem avaliação gravada: os critérios acima usam dados já vistos e não aprovam nada.")
+        print("A avaliação deste modelo vem dos dados futuros (`bitsignal forward-eval`).")
     if args.window == "development" and frozen is not None and frozen.approval is not None:
         a = frozen.approval
         print("")
@@ -174,8 +178,12 @@ def cmd_freeze_params(args):
     rel = target.relative_to(REPO_ROOT).as_posix() if target.is_relative_to(REPO_ROOT) else str(target)
     _set_frozen_pointer(getattr(args, "config_path", None) or DEFAULT_CONFIG_PATH, rel)
     print(f"[OK] Parâmetros congelados em {rel} (model_hash {frozen.model_hash[:12]}…).")
-    print("     Próximo passo: commitar este arquivo e o config.yaml; só depois rodar")
-    print("     `bitsignal backtest --window development --record`.")
+    if cfg.buys.on_reset != "none":
+        print("     Próximo passo: commitar este arquivo e o config.yaml. Modelo v2: sem --record;")
+        print("     a avaliação vem dos dados futuros (`bitsignal forward-eval`).")
+    else:
+        print("     Próximo passo: commitar este arquivo e o config.yaml; só depois rodar")
+        print("     `bitsignal backtest --window development --record`.")
 
 
 def _record_refusal(args, cfg, frozen):

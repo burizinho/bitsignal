@@ -117,3 +117,17 @@ mostrou que não ajudam); recalibrar qualquer parâmetro do v1; alertas; registr
 7.  Congelar o v2 (commit próprio).
 8.  Testes: hash do v1 inalterado; `all_cash` com caso sintético; v1 pelo `config_v1.yaml` reproduz o
     golden; painel com o v2; `forward-eval` sem rede.
+
+## Implementação (2026-11-09)
+
+*   `buys.on_reset` com `HASH_COMPAT_DEFAULTS` em `config.py`: o v1 continua com o hash `15d1e484…`
+    (teste em `tests/test_v2.py`); o v2 tem `dc9ea76f…`, congelado em
+    `config/frozen/params_v2_2026-11-09.yaml` com `approval: null`.
+*   O v2 reproduz exatamente a variante `leftover_buy` da Fase 2 (teste compara as curvas).
+*   O registro semanal escolhe o arquivo pelo config (`data.verdict_log_path`) e recusa gravar um
+    modelo num arquivo de outro. Na semana de reinício do v2, `buy_pct` = `all_cash`.
+*   Painel: com `approval: null`, a aba de backtest mostra só a janela de calibração e o aviso de que
+    a aprovação vem dos dados futuros. `backtest --window development` do v2 imprime o mesmo aviso.
+*   `--record` é recusado no v2. `forward-eval` só exibe; gravar a conclusão de E4 fica para quando a
+    janela fechar (comando a definir nessa data, sem mudar o critério).
+
