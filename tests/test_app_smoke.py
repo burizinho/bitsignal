@@ -72,6 +72,9 @@ def test_top_line_and_experimental_badge():
     assert "O que mudaria o veredito" in texts(at.markdown)
     assert "Exportar para a planilha" in texts(at.markdown)
     assert len(at.get("download_button")) == 2  # this week's verdict + the recorded weekly log
+    n = sum(1 for _ in open(ROOT / CFG.data.verdict_log_path, encoding="utf-8")) - 1  # rows minus header
+    label = f"Registro semanal gravado ({n} semana{'s' if n != 1 else ''})"
+    assert label in [b.proto.label for b in at.get("download_button")]
     assert "score mínimo ≥ 30 por 2 semanas" in texts(at.markdown)
 
 
