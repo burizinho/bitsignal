@@ -52,7 +52,7 @@ from bitsignal.data.history import derive_daily, from_frame, load_frozen_history
 from bitsignal.engine.cycle import data_status, latest_verdict  # noqa: E402
 from bitsignal.engine.pipeline import run_model  # noqa: E402
 from bitsignal.models import DataStatus, InputState, Phase, ScoreStatus  # noqa: E402
-from bitsignal.ui import calculator, charts  # noqa: E402
+from bitsignal.ui import calculator, charts, whatif  # noqa: E402
 
 # --------------------------------------------------------------------------------------
 # Injection points (module level; patched by tests/test_app_smoke.py)
@@ -232,6 +232,13 @@ def render_detector(result):
         st.write("Detector de reversão: **desarmado**")
 
 
+def render_what_would_change(result, cfg):
+    """Next triggers of the model and today's distance to them (read-only explanation)."""
+    st.markdown("**O que mudaria o veredito**")
+    st.markdown("\n".join(f"- {line}" for line in whatif.what_would_change(result.weeks, cfg)))
+    st.caption("Regras do modelo, comparadas com a última semana fechada. Não é previsão.")
+
+
 def render_cycle(result, verdict, cfg):
     cycle_start = pd.Timestamp(verdict.cycle_start_date)
     weeks = result.weeks.loc[cycle_start:]
@@ -376,6 +383,7 @@ def main():
         c2.plotly_chart(charts.sell_target_gauge(verdict.sell_target, cfg.cap.cap), width="stretch")
         c2.caption(f"Venda acumulada-alvo: {_pct(verdict.sell_target)} de no máximo {_pct(cfg.cap.cap)} da posição-base.")
         render_detector(result)
+        render_what_would_change(result, cfg)
         render_calculator(verdict, float(last["price"]))
     with tab_inputs:
         render_inputs(result, history, cfg)
