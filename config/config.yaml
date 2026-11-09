@@ -1,82 +1,80 @@
-system:
-  name: "BitSignal"
-  version: "0.1.0"
-  database_path: "./data/bitsignal.db"
-  log_level: "INFO"
+# BitSignal — config do modelo de ciclo unificado (Fase 1).
+# Schema e validação: bitsignal/config.py. Regras: docs/designs/bitcoin_unified_cycle_model.md (§2–§8).
+# Os blocos antigos (system, metrics, integrity, alerting, endpoints, strategy) saíram no S2;
+# o painel antigo não depende deles (strategy.* tem defaults em weekly_evaluator.py).
 
-metrics:
-  mvrv_z:
-    weight: 0.25
-    min_value: 0.15
-    max_value: 5.00
-    direction: "direct"
-  sma200w_ratio:
-    weight: 0.20
-    min_value: 1.00
-    max_value: 3.50
-    direction: "direct"
-  puell_multiple:
-    weight: 0.20
-    min_value: 0.45
-    max_value: 2.20
-    direction: "direct"
-  picycle:
-    weight: 0.15
-    min_ratio: 0.70
-    max_ratio: 1.00
-    direction: "direct"
-  weekly_rsi:
-    weight: 0.10
-    min_value: 32.0
-    max_value: 80.0
-    direction: "direct"
-  hash_ribbon:
-    weight: 0.10
-    scores:
-      NORMAL: 50.0
-      CAPITULATION: 20.0
-      BUY_RECOVERY: 10.0
+score:
+  inputs:                      # chaves canônicas usadas no código e nos selos
+    mvrv_z:           {weight: 0.25, min: 0.15, max: 5.00}
+    price_to_sma200w: {weight: 0.20, min: 1.00, max: 3.50}
+    puell:            {weight: 0.20, min: 0.45, max: 2.20}
+    picycle:          {weight: 0.15, min: 0.70, max: 1.00}
+    rsi14w:           {weight: 0.10, min: 32.0, max: 80.0}
+    hash_ribbon:      {weight: 0.10}
+  hash_ribbon_points: {NORMAL: 50.0, CAPITULATION: 20.0, BUY_RECOVERY: 10.0}
+  picycle_bottom_factor: 0.745
+  essential: [mvrv_z, puell]
+  max_missing_weight: 0.20
 
-integrity:
-  fresh_threshold_hours: 36
-  expired_threshold_hours: 48
-  max_missing_weight_tolerance: 0.20
-  imputed_neutral_score: 50.0
+sell_ladder:                   # [score_min mínimo, venda acumulada]
+  - [85.0, 0.05]
+  - [90.0, 0.15]
+  - [93.0, 0.30]
 
-alerting:
-  tiers:
-    tier1_top:
-      threshold: 80.0
-      rearm_deadband: 75.0
-      divestment_tranche_pct: 20.0
-      cumulative_exit_pct: 20.0
-    tier2_top:
-      threshold: 85.0
-      rearm_deadband: 82.0
-      divestment_tranche_pct: 10.0
-      cumulative_exit_pct: 30.0
-    tier3_top:
-      threshold: 90.0
-      rearm_deadband: 87.0
-      divestment_tranche_pct: 10.0
-      cumulative_exit_pct: 40.0
-    bottom_capitulation:
-      threshold: 20.0
-      rearm_deadband: 25.0
-      action: "DCA_ACCUMULATION"
-  sovereign_baseline_pct: 60.0
+detector:
+  arming_weeks: 52
+  trend_sma_weeks: 30
+  confirm_weeks: 2
+  trigger_max_ratio_to_high52: 0.80
+  n2_sma_weeks: 50
+  n3_max_ratio_to_high52: 0.60
+  levels: [0.10, 0.25, 0.50]
 
-endpoints:
-  binance_klines: "https://api.binance.com/api/v3/klines"
-  mempool_hashrate: "https://mempool.space/api/v1/mining/hashrate/3m"
-  dune_execution: "https://api.dune.com/api/v1/query/{query_id}/execute"
-  github_csv_mirror: "https://raw.githubusercontent.com/datasets/bitcoin-onchain/main/data/mvrv_puell_daily.csv"
+cap:
+  floor: 0.50
 
+cycle:
+  arm_score: 20.0
+  arm_weeks: 2
+  confirm_score: 30.0
+  confirm_weeks: 2
 
-strategy:
-  strategy_mode: "tax_optimized_cycle"
-  cycle_ath_usd: 126000.0
-  total_reserve_brl: 100000.0
-  bank_night_limit_brl: 5000.0
-  default_exchange: "Bipa"
-  moonbag_pct: 0.20
+buys:
+  mode: score_dca              # score_dca | uniform (uniform só no benchmark)
+  tiers:                       # [score_max máximo, % da reserva-base por semana]
+    - [10.0, 0.04]
+    - [20.0, 0.02]
+  uniform_weeks: 52
+
+backtest:
+  initial_btc: 1.0
+  reserve_btc_equiv: 0.5
+  start: first_all_valid_week  # ou uma data ISO
+  execution_lag_days: 1
+  fee: 0.003
+  calibration_end: 2018-12-31
+  approval_window_start: 2019-01-01
+  criteria: {equity_vs_bnh: 0.90, dd_improvement_pp: 10.0, equity_vs_uniform: 1.00}
+  sensitivities:
+    reserve_0:       {backtest: {reserve_btc_equiv: 0.0}}
+    reserve_1:       {backtest: {reserve_btc_equiv: 1.0}}
+    lag_2:           {backtest: {execution_lag_days: 2}}
+    late_entry_2019: {backtest: {start: 2019-01-01}}
+  events:
+    - {name: fundo_2015, kind: bottom, window: [2014-12-01, 2015-09-30]}
+    - {name: topo_2017, kind: top, window: [2017-11-01, 2018-01-31]}
+    - {name: fundo_2018, kind: bottom, window: [2018-11-01, 2019-02-28]}
+    - {name: topo_2021_abr, kind: top, window: [2021-03-01, 2021-05-15]}
+    - {name: topo_2021_nov, kind: top, window: [2021-10-01, 2021-12-15]}
+    - {name: fundo_2022, kind: bottom, window: [2022-06-01, 2023-01-31]}
+    - {name: topo_2025, kind: top, window: [2025-09-01, 2025-11-30]}
+  frozen_params: null          # caminho do arquivo congelado (S6); fora do model_hash
+
+data:
+  csv_path: data/historical/btc_coinmetrics.csv
+  max_staleness_days: 9
+
+ui:
+  cache_ttl_coinmetrics: "6h"  # str repassado ao st.cache_data
+  cache_ttl_spot: "15m"
+  retry_cooldown_s: 30
