@@ -214,6 +214,41 @@ def cmd_evaluate(args):
     print("Painel experimental: os percentuais são referências do modelo, não ordens.")
 
 
+def _now_utc():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc)
+
+
+def cmd_record_verdict(args):
+    """Append the latest closed week's verdict to the weekly log (forward validation).
+
+    Exit 1 without writing when the data is stale or the source fails, so the scheduled job
+    shows the failure instead of recording a week without a verdict.
+    """
+    from bitsignal.config import load_config, repo_path
+    from bitsignal.data.coinmetrics import fetch_coinmetrics
+    from bitsignal.data.history import from_frame
+    from bitsignal.engine.cycle import latest_verdict
+    from bitsignal.engine.pipeline import run_model
+    from bitsignal.verdict_log import DEFAULT_LOG_PATH, append_verdict, verdict_row
+
+    cfg = load_config()
+    now = _now_utc()
+    history = from_frame(fetch_coinmetrics(), source="coinmetrics_live")
+    result = run_model(history, cfg)
+    v = latest_verdict(result, now, cfg)
+    if v.phase is None:
+        print(f"[ERRO] Semana {v.week}: sem veredito ({v.reason}). Nada gravado.")
+        sys.exit(1)
+    path = repo_path(args.out or DEFAULT_LOG_PATH)
+    if append_verdict(path, verdict_row(result, v, now)):
+        print(f"[OK] Semana {v.week} gravada em {path}: {v.phase.label}, "
+              f"venda-alvo {v.sell_target * 100:.0f}%.")
+    else:
+        print(f"[OK] Semana {v.week} já estava gravada; nada mudou.")
+
+
 def cmd_ui(args):
     """Launch Streamlit dashboard through the same entrypoint used by Streamlit Cloud."""
     app_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "streamlit_app.py")
@@ -274,6 +309,10 @@ def main():
     subparsers.add_parser("evaluate", help="Print the model verdict for the latest closed week (live data)")
     subparsers.add_parser("ui", help="Launch the Streamlit dashboard")
 
+    p_rv = subparsers.add_parser("record-verdict",
+                                 help="Append the latest closed week's verdict to the weekly log")
+    p_rv.add_argument("--out", default=None, help="Default: data/verdicts/weekly_verdicts.csv")
+
     args = parser.parse_args()
     commands = {
         "fetch-history": cmd_fetch_history,
@@ -281,6 +320,7 @@ def main():
         "freeze-params": cmd_freeze_params,
         "evaluate": cmd_evaluate,
         "ui": cmd_ui,
+        "record-verdict": cmd_record_verdict,
     }
     commands[args.command](args)
 

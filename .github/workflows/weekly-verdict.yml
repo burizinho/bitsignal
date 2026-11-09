@@ -1,0 +1,43 @@
+name: Registro semanal do veredito
+
+# Grava o veredito da última semana fechada em data/verdicts/weekly_verdicts.csv.
+# Segunda e terça às 12:00 UTC: o CoinMetrics publica o dado de domingo no dia seguinte, e a
+# segunda execução só grava se a primeira não encontrou a semana nova (linhas nunca são reescritas).
+on:
+  schedule:
+    - cron: "0 12 * * 1,2"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-verdict
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Record verdict
+        run: bitsignal record-verdict
+      - name: Commit
+        run: |
+          if [ -z "$(git status --porcelain -- data/verdicts)" ]; then
+            echo "Nada novo para gravar."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add data/verdicts
+          git commit -m "chore(verdicts): registro semanal do veredito"
+          git pull --rebase origin main
+          git push origin HEAD:main
