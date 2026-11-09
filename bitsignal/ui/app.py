@@ -116,13 +116,20 @@ def _d(x) -> str:
 
 
 def top_line(verdict, cfg) -> str:
-    buy = _pct(verdict.buy_pct) if verdict.buy_pct is not None else "—"
+    if verdict.buy_all_cash:
+        buy = "**todo o caixa disponível** (inclui o produto das vendas)"
+    else:
+        buy = f"**{_pct(verdict.buy_pct) if verdict.buy_pct is not None else '—'}** da reserva-base"
     return (
         f"Semana fechada em {_d(verdict.week)} · **{verdict.phase.label}** · "
         f"Venda acumulada-alvo no ciclo: **{_pct(verdict.sell_target)}** da posição-base "
         f"(ciclo iniciado em {_d(verdict.cycle_start_date)}) · "
-        f"Compra programada nesta semana: **{buy}** da reserva-base · Motivo: {verdict.reason}"
+        f"Compra programada nesta semana: {buy} · Motivo: {verdict.reason}"
     )
+
+
+def model_label(cfg) -> str:
+    return "modelo v2 (reinvestimento do caixa)" if cfg.buys.on_reset == "all_cash" else "modelo v1"
 
 
 def render_spot():
@@ -226,22 +233,25 @@ def render_dune(history, cfg):
 def render_backtest(cfg):
     frozen = load_frozen_params(cfg.backtest.frozen_params)
     current = model_hash(cfg)
-    if frozen is not None and frozen.model_hash == current:
-        rep = cached_backtest(current, "development", cfg, frozen)
+    window = "calibration"
+    if frozen is None or frozen.model_hash != current:
+        msg = "sem parâmetros congelados" if frozen is None else "parâmetros diferentes dos congelados"
+        st.warning(f"{msg.capitalize()}: status aprovado não se aplica. Mostrando só a janela de calibração.")
+    elif frozen.approval is None:  # v2: no evaluation on seen data; approval only from forward data
+        st.warning("Experimental: este modelo não tem avaliação gravada. A aprovação só vem da avaliação "
+                   "com dados futuros (Fase 3). Mostrando só a janela de calibração.")
+    else:
+        window = "development"
         a = frozen.approval
-        if a is not None and all(a.passed.model_dump().values()):
+        if all(a.passed.model_dump().values()):
             st.success("Desempenho histórico aprovado (critérios da Q1, gravados no congelamento). Sem promessa de rentabilidade.")
         else:
             st.warning("Experimental: os critérios financeiros da Q1 não foram todos atingidos na avaliação gravada.")
-        if a is not None:
-            st.dataframe(
-                pd.DataFrame({"valor gravado": a.values.model_dump(), "aprovado": a.passed.model_dump()}),
-                width="stretch",
-            )
-    else:
-        msg = "sem parâmetros congelados" if frozen is None else "parâmetros diferentes dos congelados"
-        st.warning(f"{msg.capitalize()}: status aprovado não se aplica. Mostrando só a janela de calibração.")
-        rep = cached_backtest(current, "calibration", cfg, None)
+        st.dataframe(
+            pd.DataFrame({"valor gravado": a.values.model_dump(), "aprovado": a.passed.model_dump()}),
+            width="stretch",
+        )
+    rep = cached_backtest(current, window, cfg, frozen if window == "development" else None)
     st.caption(BACKTEST_HEADER)
     frames = to_frames(rep)
     st.plotly_chart(charts.equity_chart(frames), width="stretch")
@@ -256,6 +266,7 @@ def render_glossary():
 - **Venda acumulada-alvo:** quanto da posição-base o modelo recomenda ter vendido no ciclo (catraca; teto de 50%).
 - **Reserva-base:** caixa em USD destinado a compras, fixado no início da campanha.
 - **Fases:** ACUMULAR (reinício armado, compras pelo score), DISTRIBUIR (catraca > 0), MANTER.
+- **Compra no reinício (modelo v2):** na semana em que um ciclo novo começa, comprar com todo o caixa disponível, incluindo o produto das vendas do ciclo anterior.
 - **Detector de reversão:** independente do score; níveis N1 10%, N2 25%, N3 50%.
 """
     )
@@ -270,7 +281,8 @@ def main():
     """Render the dashboard. Called on every Streamlit run (including reruns)."""
     st.set_page_config(page_title="BitSignal — Modelo de Ciclo", page_icon="⚡", layout="wide")
     st.title("⚡ BitSignal — Modelo de Ciclo Unificado")
-    st.caption("Painel experimental · só leitura · não executa ordens · os percentuais são referências do modelo, não ordens.")
+    st.caption(f"Painel experimental · {model_label(get_config())} · só leitura · não executa ordens · "
+               "os percentuais são referências do modelo, não ordens.")
 
     cfg = get_config()
     try:
@@ -297,6 +309,9 @@ def main():
         return
 
     verdict = latest_verdict(result, now, cfg)
+    if verdict.buy_all_cash:
+        st.success("Ciclo novo nesta semana: comprar com **todo o caixa disponível** (inclui o produto das "
+                   "vendas). O valor sai da sua planilha; o painel não conhece o seu caixa.")
     if verdict.phase == Phase.ACCUMULATE:
         st.success(f"Compra programada nesta semana: **{_pct(verdict.buy_pct) if verdict.buy_pct is not None else '—'}** da reserva-base (sujeita ao caixa disponível)")
         st.info(ACCUMULATE_NOTICE)

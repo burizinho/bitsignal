@@ -1,4 +1,5 @@
-# BitSignal — config do modelo de ciclo unificado (Fase 1).
+# BitSignal — modelo v2 (Fase 3: reinvestimento do caixa). É o config do painel.
+# Igual ao v1 (config/config_v1.yaml), exceto buys.on_reset. Design: docs/designs/bitcoin_cycle_phase3_reinvestment.md.
 # Schema e validação: bitsignal/config.py. Regras: docs/designs/bitcoin_unified_cycle_model.md (§2–§8).
 # Os blocos antigos (system, metrics, integrity, alerting, endpoints, strategy) saíram no S2.
 
@@ -44,6 +45,7 @@ buys:
     - [10.0, 0.04]
     - [20.0, 0.02]
   uniform_weeks: 52
+  on_reset: all_cash           # v2: no reinício, compra com todo o caixa restante (v1: none)
 
 backtest:
   initial_btc: 1.0
@@ -67,10 +69,11 @@ backtest:
     - {name: topo_2021_nov, kind: top, window: [2021-10-01, 2021-12-15]}
     - {name: fundo_2022, kind: bottom, window: [2022-06-01, 2023-01-31]}
     - {name: topo_2025, kind: top, window: [2025-09-01, 2025-11-30]}
-  frozen_params: config/frozen/params_2026-11-09.yaml  # caminho do arquivo congelado (S6); fora do model_hash
+  frozen_params: config/frozen/params_v2_2026-11-09.yaml  # preenchido pelo freeze-params do v2; fora do model_hash
 
 data:
   csv_path: data/historical/btc_coinmetrics.csv
+  verdict_log_path: data/verdicts/weekly_verdicts_v2.csv
   max_staleness_days: 9
 
 ui:

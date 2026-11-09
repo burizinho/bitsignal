@@ -1,6 +1,7 @@
 name: Registro semanal do veredito
 
-# Grava o veredito da última semana fechada em data/verdicts/weekly_verdicts.csv.
+# Grava o veredito da última semana fechada de cada modelo: v1 em data/verdicts/weekly_verdicts.csv
+# (config/config_v1.yaml) e v2 em data/verdicts/weekly_verdicts_v2.csv (config/config.yaml).
 # Segunda e terça às 12:00 UTC: o CoinMetrics publica o dado de domingo no dia seguinte, e a
 # segunda execução só grava se a primeira não encontrou a semana nova (linhas nunca são reescritas).
 on:
@@ -27,7 +28,9 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: pip install -e .
-      - name: Record verdict
+      - name: Record verdict (v1)
+        run: bitsignal record-verdict --config config/config_v1.yaml
+      - name: Record verdict (v2)
         run: bitsignal record-verdict
       - name: Commit
         run: |

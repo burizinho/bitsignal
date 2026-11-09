@@ -29,9 +29,10 @@ def with_cmp(**cmp):
 
 
 def test_comparison_block_stays_out_of_the_frozen_hash():
-    frozen = load_frozen_params(CFG.backtest.frozen_params)
-    assert model_hash(CFG) == frozen.model_hash
-    assert model_hash(with_cmp(buy_sizing="cash", floor_base="initial")) == frozen.model_hash
+    v1 = load_config("config/config_v1.yaml")
+    frozen = load_frozen_params(v1.backtest.frozen_params)
+    assert model_hash(v1) == frozen.model_hash
+    assert model_hash(apply_overrides(v1, {"comparison": {"buy_sizing": "cash", "floor_base": "initial"}})) == frozen.model_hash
 
 
 @pytest.mark.parametrize("cmp", [
