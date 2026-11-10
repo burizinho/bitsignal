@@ -77,6 +77,7 @@ def test_top_line_and_experimental_badge():
     label = f"Registro semanal gravado ({n} semana{'s' if n != 1 else ''})"
     assert label in [b.proto.label for b in at.get("download_button")]
     assert "score mínimo ≥ 30 por 2 semanas" in texts(at.markdown)
+    assert "US\\$ 123,524" in texts(at.markdown)  # "$" escaped: no math formula in the detector line
 
 
 def test_stale_data_shows_no_verdict():
@@ -131,7 +132,7 @@ def test_calculator_turns_percentages_into_amounts():
     assert not at.exception
     md = texts(at.markdown)
     assert "**0.25000000 BTC**" in md  # 25% of 1 BTC
-    assert "**US$ 20.00**" in md  # 2% of the 1,000 USD reserve (week 08/11/2026, ACCUMULATE)
+    assert "**US\\$ 20.00**" in md  # 2% of the 1,000 USD reserve; "$" escaped (not a formula)
 
 
 def test_late_weekly_log_is_highlighted():
