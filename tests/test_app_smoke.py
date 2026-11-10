@@ -71,6 +71,7 @@ def test_top_line_and_experimental_badge():
     assert "não alteram a posição-base" in texts(at.info)  # ACCUMULATE fixed notice
     assert "O que mudaria o veredito" in texts(at.markdown)
     assert "Exportar para a planilha" in texts(at.markdown)
+    assert "Registro semanal: última semana gravada" in texts(at.caption)
     assert len(at.get("download_button")) == 2  # this week's verdict + the recorded weekly log
     n = sum(1 for _ in open(ROOT / CFG.data.verdict_log_path, encoding="utf-8")) - 1  # rows minus header
     label = f"Registro semanal gravado ({n} semana{'s' if n != 1 else ''})"
@@ -131,3 +132,16 @@ def test_calculator_turns_percentages_into_amounts():
     md = texts(at.markdown)
     assert "**0.25000000 BTC**" in md  # 25% of 1 BTC
     assert "**US$ 20.00**" in md  # 2% of the 1,000 USD reserve (week 08/11/2026, ACCUMULATE)
+
+
+def test_late_weekly_log_is_highlighted():
+    from datetime import date
+
+    from bitsignal.verdict_log import LogStatus
+
+    late = [LogStatus("v2", date(2026, 10, 18), True), LogStatus("v1", date(2026, 10, 18), True)]
+    with mock.patch.object(app, "log_status", lambda logs, now, max_days: late):
+        at = run_app()
+    assert not at.exception
+    assert "Atrasado" in texts(at.warning) and "18/10/2026" in texts(at.warning)
+

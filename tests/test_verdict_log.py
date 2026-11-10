@@ -81,3 +81,16 @@ def test_cli_stale_data_fails_without_writing(tmp_path):
         _run_cli(tmp_path, datetime(2026, 11, 30, tzinfo=timezone.utc))
     assert exc.value.code == 1
     assert not (tmp_path / "log.csv").exists()
+
+
+def test_log_status_flags_missing_and_late_logs(tmp_path):
+    from bitsignal.verdict_log import log_status
+
+    path = tmp_path / "log.csv"
+    append_verdict(path, _row())  # week 2026-11-08, ends Monday 2026-11-09 00:00 UTC
+    logs = {"v2": path, "v1": tmp_path / "missing.csv"}
+    fresh, missing = log_status(logs, datetime(2026, 11, 10, tzinfo=timezone.utc), 9)
+    assert fresh.model == "v2" and str(fresh.last_week) == "2026-11-08" and not fresh.late
+    assert missing.last_week is None and missing.late
+    (late,) = log_status({"v2": path}, datetime(2026, 11, 18, 1, tzinfo=timezone.utc), 9)
+    assert late.late  # more than 9 days after the week ended: the weekly run probably failed
