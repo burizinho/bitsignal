@@ -122,6 +122,11 @@ def _d(x) -> str:
     return pd.Timestamp(x).strftime("%d/%m/%Y")
 
 
+def _md(text: str) -> str:
+    """Escape "$" for Streamlit markdown (text between two "$" is rendered as a math formula)."""
+    return text.replace("$", "\\$")
+
+
 def top_line(verdict, cfg) -> str:
     if verdict.buy_all_cash:
         buy = "**todo o caixa disponível** (inclui o produto das vendas)"
@@ -145,7 +150,7 @@ def render_spot():
         st.caption("Preço agora (yfinance, somente exibição): indisponível.")
     else:
         price, ts = spot
-        st.caption(f"Preço agora (yfinance, somente exibição): US$ {price:,.0f} às {ts:%H:%M} UTC")
+        st.caption(f"Preço agora (yfinance, somente exibição): US\\$ {price:,.0f} às {ts:%H:%M} UTC")
 
 
 def render_calculator(verdict, week_close: float):
@@ -154,7 +159,7 @@ def render_calculator(verdict, week_close: float):
     price, source = (spot[0], "preço agora (yfinance)") if spot else (week_close, "fechamento da semana")
     with st.expander("Calculadora: converter os percentuais em valores (opcional)"):
         st.caption("Os números digitados ficam só nesta sessão do navegador: não são gravados nem viram "
-                   f"registro de operações. Valores brutos, sem custos. Preço usado: {source}, US$ {price:,.0f}.")
+                   f"registro de operações. Valores brutos, sem custos. Preço usado: {source}, US\\$ {price:,.0f}.")
         c1, c2 = st.columns(2)
         base = c1.number_input("BTC no início do ciclo (posição-base)", min_value=0.0, value=0.0,
                                step=0.01, format="%.8f", key="calc_base_btc")
@@ -169,13 +174,13 @@ def render_calculator(verdict, week_close: float):
         if a.sell_target_btc is not None:
             lines.append(f"Venda acumulada-alvo do ciclo: **{a.sell_target_btc:.8f} BTC** "
                          f"({_pct(verdict.sell_target)} de {base:.8f} BTC). Falta vender: **{a.to_sell_btc:.8f} BTC** "
-                         f"(≈ US$ {a.to_sell_usd:,.0f}).")
+                         f"(≈ US\\$ {a.to_sell_usd:,.0f}).")
         if verdict.buy_all_cash:
-            lines.append(f"Compra desta semana: **todo o caixa**, US$ {a.buy_usd:,.2f} ≈ **{a.buy_btc:.8f} BTC**."
+            lines.append(f"Compra desta semana: **todo o caixa**, US\\$ {a.buy_usd:,.2f} ≈ **{a.buy_btc:.8f} BTC**."
                          if a.buy_usd else "Compra desta semana: todo o caixa disponível (informe o caixa).")
         elif a.buy_usd is not None:
             limit = " (limitada ao caixa informado)" if a.buy_limited_by_cash else ""
-            lines.append(f"Compra desta semana: **US$ {a.buy_usd:,.2f}** ≈ **{a.buy_btc:.8f} BTC**{limit}.")
+            lines.append(f"Compra desta semana: **US\\$ {a.buy_usd:,.2f}** ≈ **{a.buy_btc:.8f} BTC**{limit}.")
         elif not verdict.buy_pct:
             lines.append("Sem compra programada nesta semana.")
         st.markdown("\n\n".join(lines) if lines else "Informe os valores acima para ver as quantidades.")
@@ -283,7 +288,8 @@ def render_export(result, verdict, cfg, now):
 def render_what_would_change(result, cfg):
     """Next triggers of the model and today's distance to them (read-only explanation)."""
     st.markdown("**O que mudaria o veredito**")
-    st.markdown("\n".join(f"- {line}" for line in whatif.what_would_change(result.weeks, cfg)))
+    lines = whatif.what_would_change(result.weeks, cfg)
+    st.markdown("\n".join(f"- {_md(line)}" for line in lines))
     st.caption("Regras do modelo, comparadas com a última semana fechada. Não é previsão.")
 
 
