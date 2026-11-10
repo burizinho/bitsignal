@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import pandas as pd
 
@@ -107,3 +108,27 @@ def append_verdict(path: Union[str, Path], row: Dict[str, str]) -> bool:
             w.writeheader()
         w.writerow(row)
     return True
+
+
+@dataclass(frozen=True)
+class LogStatus:
+    model: str
+    last_week: Optional[date]  # None: file missing or empty
+    late: bool  # last recorded week ended more than ``max_days`` ago (or nothing recorded)
+
+
+def log_status(logs: Dict[str, Union[str, Path]], now: datetime, max_days: int) -> List[LogStatus]:
+    """Last recorded week of each weekly log, flagged late with the dashboard's staleness rule.
+
+    A week ends on Monday 00:00 UTC (``week_end``); the workflow records it on Monday or Tuesday.
+    """
+    from bitsignal.engine.cycle import week_end
+
+    out = []
+    for model, path in logs.items():
+        last = last_recorded_week(path)
+        last_date = date.fromisoformat(last) if last else None
+        late = last_date is None or now - week_end(last_date) > timedelta(days=max_days)
+        out.append(LogStatus(model, last_date, late))
+    return out
+

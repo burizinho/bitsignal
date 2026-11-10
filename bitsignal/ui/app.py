@@ -54,7 +54,7 @@ from bitsignal.engine.cycle import data_status, latest_verdict  # noqa: E402
 from bitsignal.engine.pipeline import run_model  # noqa: E402
 from bitsignal.models import DataStatus, InputState, Phase, ScoreStatus  # noqa: E402
 from bitsignal.ui import calculator, charts, export, whatif  # noqa: E402
-from bitsignal.verdict_log import verdict_row  # noqa: E402
+from bitsignal.verdict_log import log_status, verdict_row  # noqa: E402
 
 # --------------------------------------------------------------------------------------
 # Injection points (module level; patched by tests/test_app_smoke.py)
@@ -232,6 +232,31 @@ def render_detector(result):
         st.write("Detector de reversão: **armado** (ATH nas últimas 52 semanas), sem episódio")
     else:
         st.write("Detector de reversão: **desarmado**")
+
+
+LOG_MODELS = {"v1": "config/config_v1.yaml", "minimal": "config/config_minimal.yaml"}  # v2: the dashboard config
+
+
+def render_log_status(cfg, now):
+    """When the weekly log was last recorded. Read-only: shown when someone opens the dashboard."""
+    logs = {"v2": repo_path(cfg.data.verdict_log_path)}
+    for name, path in LOG_MODELS.items():
+        try:
+            logs[name] = repo_path(load_config(repo_path(path)).data.verdict_log_path)
+        except (OSError, ConfigError):
+            continue
+    status = log_status(logs, now, cfg.data.max_staleness_days)
+    weeks = {s.last_week for s in status}
+    if len(weeks) == 1 and None not in weeks:
+        text = f"Registro semanal: última semana gravada {_d(next(iter(weeks)))} ({', '.join(s.model for s in status)})."
+    else:
+        text = "Registro semanal: " + " · ".join(
+            f"{s.model} {_d(s.last_week) if s.last_week else 'sem registro'}" for s in status) + "."
+    if any(s.late for s in status):
+        st.warning(f"{text} Atrasado: o registro automático de segunda e terça pode ter falhado "
+                   "(veja a aba Actions do repositório no GitHub).")
+    else:
+        st.caption(text)
 
 
 def render_export(result, verdict, cfg, now):
@@ -418,6 +443,7 @@ def main():
         render_backtest(cfg)
     with tab_gloss:
         render_glossary()
+    render_log_status(cfg, now)
     st.caption("Dados: CoinMetrics Community (CC BY-NC 4.0). Uso não comercial.")
 
 
