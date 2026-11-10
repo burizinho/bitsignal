@@ -161,4 +161,5 @@ pytest -q --cov=bitsignal --cov-fail-under=70
 pytest -q --cov=bitsignal/engine --cov=bitsignal/backtest --cov-fail-under=90
 ```
 
-Os testes rodam sem rede. O CI (`.github/workflows/ci.yml`) roda os mesmos comandos em Python 3.11.
+Os testes rodam sem rede. O CI (`.github/workflows/ci.yml`) roda os mesmos comandos em Python 3.11
+(versão em que as dependências foram fixadas) e 3.14 (versão do Streamlit Cloud).

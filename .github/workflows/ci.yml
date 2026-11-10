@@ -7,11 +7,18 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11: version the pinned dependencies were resolved on (S9).
+        # 3.14: version Streamlit Cloud runs the published dashboard on.
+        python-version: ["3.11", "3.14"]
+    name: test (Python ${{ matrix.python-version }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
       - name: Install
         run: pip install -e ".[ui,dev]"
       - name: Lint
