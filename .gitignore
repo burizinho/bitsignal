@@ -39,8 +39,10 @@ htmlcov/
 # IDE & OS
 .vscode/
 .idea/
+.claude/
 .DS_Store
 Thumbs.db
+/Manual_BitSignal.pdf
 
 # Local databases (the model is stateless; nothing is persisted)
 data/*.db

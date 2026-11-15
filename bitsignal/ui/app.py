@@ -516,6 +516,13 @@ O painel passará a abrir em tela cheia, como um app nativo, sem barras de naveg
 """
         )
 
+    manual_p = repo_path("docs/manual/Manual_BitSignal.pdf")
+    if manual_p.is_file():
+        st.markdown("---")
+        st.markdown("### 📥 Manual Completo do Usuário")
+        st.caption("Documento institucional detalhando a teoria do modelo, os indicadores on-chain e as regras da catraca e da escada de vendas.")
+        st.markdown("📄 **[Clique aqui para abrir ou baixar o Manual Oficial do BitSignal (PDF)](https://github.com/burizinho/bitsignal/raw/main/docs/manual/Manual_BitSignal.pdf)**")
+
 
 # --------------------------------------------------------------------------------------
 # Main
@@ -538,6 +545,14 @@ def main():
             <meta name="apple-mobile-web-app-title" content="BitSignal">
             <meta name="mobile-web-app-capable" content="yes">
             <meta name="theme-color" content="#0e1117">
+            <!-- Open Graph / WhatsApp / Telegram Preview -->
+            <meta property="og:type" content="website">
+            <meta property="og:title" content="BitSignal — Modelo de Ciclo Unificado do Bitcoin">
+            <meta property="og:description" content="Painel de valuation on-chain, fases macro de mercado e gestão estratégica de ciclo do Bitcoin.">
+            <meta property="og:site_name" content="BitSignal">
+            <meta name="twitter:card" content="summary_large_image">
+            <meta name="twitter:title" content="BitSignal — Modelo de Ciclo Unificado do Bitcoin">
+            <meta name="twitter:description" content="Painel de valuation on-chain, fases macro de mercado e gestão estratégica de ciclo do Bitcoin.">
         </head>
         """,
         unsafe_allow_html=True,
