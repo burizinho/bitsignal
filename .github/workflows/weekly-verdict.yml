@@ -35,6 +35,35 @@ jobs:
         run: bitsignal record-verdict
       - name: Record verdict (minimal, comparison arm)
         run: bitsignal record-verdict --config config/config_minimal.yaml
+      - name: Send Telegram notification (optional)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import os, requests
+          token = os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()
+          chat_id = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
+          if not token or not chat_id:
+              print('Telegram secrets not set, skipping notification.')
+              exit(0)
+          import pandas as pd
+          try:
+              df = pd.read_csv('data/verdicts/weekly_verdicts_v2.csv')
+              last = df.iloc[-1]
+              msg = (
+                  f'⚡ *BitSignal — Veredito Semanal*\n\n'
+                  f'📅 *Semana:* {last[\"week\"]}\n'
+                  f'🎯 *Fase:* {last[\"phase\"]}\n'
+                  f'📉 *Meta de Venda Acumulada:* {float(last[\"sell_target\"])*100:.0f}%\n'
+                  f'💡 *Motivo:* {last[\"reason\"]}\n\n'
+                  f'Painel: https://bitsignal.streamlit.app'
+              )
+              requests.post(f'https://api.telegram.org/bot{token}/sendMessage', data={'chat_id': chat_id, 'text': msg, 'parse_mode': 'Markdown'}, timeout=10)
+              print('Telegram notification sent successfully.')
+          except Exception as exc:
+              print(f'Telegram notice error: {exc}')
+          "
       - name: Commit
         run: |
           if [ -z "$(git status --porcelain -- data/verdicts)" ]; then

@@ -1,5 +1,8 @@
 # BitSignal — modelo de ciclo unificado do Bitcoin
 
+[![CI](https://github.com/burizinho/bitsignal/actions/workflows/ci.yml/badge.svg)](https://github.com/burizinho/bitsignal/actions/workflows/ci.yml)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://bitsignal.streamlit.app)
+
 Painel **só de leitura** que mostra, para a última semana fechada, em que fase do ciclo o Bitcoin está
 e quanto o modelo sugere ter vendido ou comprado até ali. Não envia alertas, não registra operações e
 não faz análise fiscal: os resultados são brutos, e as operações reais ficam na planilha do usuário.

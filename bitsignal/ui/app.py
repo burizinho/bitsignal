@@ -426,6 +426,17 @@ def main():
     st.markdown(top_line(verdict, cfg))
     render_spot()
 
+    buy_desc = "todo o caixa disponível" if verdict.buy_all_cash else f"{_pct(verdict.buy_pct)} da reserva-base"
+    summary_clip = (
+        f"⚡ BitSignal — Veredito Semanal ({_d(verdict.week)})\n"
+        f"• Fase: {verdict.phase.label}\n"
+        f"• Venda acumulada-alvo: {_pct(verdict.sell_target)} da posição-base\n"
+        f"• Compra programada: {buy_desc}\n"
+        f"• Motivo: {verdict.reason}"
+    )
+    with st.expander("📋 Copiar resumo da semana (WhatsApp / Anotações)", expanded=False):
+        st.code(summary_clip, language="text")
+
     tab_week, tab_inputs, tab_cycle, tab_bt, tab_gloss = st.tabs(
         ["Semana", "Insumos", "Ciclo e eventos", "Backtest", "Glossário"]
     )
