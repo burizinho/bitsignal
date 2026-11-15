@@ -153,16 +153,16 @@ def model_label(cfg) -> str:
 def render_spot():
     spot = cached_spot()
     if spot is None:
-        st.caption("Preço agora (yfinance, somente exibição): indisponível.")
+        st.caption("Preço agora (tempo real, somente exibição): indisponível.")
     else:
         price, ts = spot
-        st.caption(f"Preço agora (yfinance, somente exibição): US\\$ {price:,.0f} às {ts:%H:%M} UTC")
+        st.caption(f"Preço agora (tempo real, somente exibição): US\\$ {price:,.0f} às {ts:%H:%M} UTC")
 
 
 def render_calculator(verdict, week_close: float):
     """Percentages -> amounts from numbers typed by the user. Session only: nothing is stored."""
     spot = cached_spot()
-    price, source = (spot[0], "preço agora (yfinance)") if spot else (week_close, "fechamento da semana")
+    price, source = (spot[0], "preço agora") if spot else (week_close, "fechamento da semana")
     with st.expander("Calculadora: converter os percentuais em valores (opcional)"):
         st.caption("Os números digitados ficam só nesta sessão do navegador: não são gravados nem viram "
                    f"registro de operações. Valores brutos, sem custos. Preço usado: {source}, US\\$ {price:,.0f}.")
@@ -367,17 +367,63 @@ def render_backtest(cfg):
 
 
 def render_glossary():
+    st.markdown("### 📖 Termos do Modelo")
     st.markdown(
         """
-- **Score de valuation (0–100):** soma ponderada de MVRV Z, preço/SMA200w, Puell, Pi Cycle, RSI semanal e Hash Ribbon.
-- **Posição-base:** BTC da carteira no início do ciclo; base das metas de venda.
-- **Venda acumulada-alvo:** quanto da posição-base o modelo recomenda ter vendido no ciclo (catraca; teto de 50%).
-- **Reserva-base:** caixa em USD destinado a compras, fixado no início da campanha.
-- **Fases:** ACUMULAR (reinício armado, compras pelo score), DISTRIBUIR (catraca > 0), MANTER.
+- **Score de valuation (0–100):** pontuação composta ponderando múltiplos on-chain e técnicos (MVRV Z, Preço/SMA200w, Puell Multiple, Pi Cycle, RSI semanal e Hash Ribbon). Quanto mais baixo o score, mais subavaliado está o Bitcoin; quanto mais alto, mais sobrecomprado.
+- **Fases do Ciclo:**
+  - **ACUMULAR:** zona de valuation baixo ou reinício armado. Momento de compras programadas e DCA estratégico.
+  - **MANTER (HOLD):** zona intermediária de equilíbrio. Sem novas compras ou vendas sugeridas pelo modelo.
+  - **DISTRIBUIR:** topo ou realização. Acionada quando a escada de venda ou o detector de reversão sugerem realizar lucros parciais.
+- **Posição-base:** quantidade de BTC da carteira no início do ciclo; referência fixa das metas de venda.
+- **Venda acumulada-alvo (Catraca):** percentual acumulado da posição-base que o modelo recomenda ter vendido no ciclo (com teto de 50%).
+- **Reserva-base:** capital em caixa reservado para compras, fixado no início da campanha.
 - **Compra no reinício (modelo v2):** na semana em que um ciclo novo começa, comprar com todo o caixa disponível, incluindo o produto das vendas do ciclo anterior.
-- **Detector de reversão:** independente do score; níveis N1 10%, N2 25%, N3 50%.
+- **Detector de reversão:** sistema de segurança independente do score; monitora desvios da máxima histórica (níveis N1 10%, N2 25%, N3 50%).
 """
     )
+
+    st.markdown("### ❓ Perguntas Frequentes (FAQ)")
+    with st.expander("🟢 Quanto menos pontos é hora de comprar e quanto mais pontos é hora de vender?"):
+        st.markdown(
+            """
+**Sim, exatamente!** A regra do score funciona como um termômetro de mercado:
+- **0 a 25 pontos:** Zona de **Forte Subavaliação** (hora de comprar). O mercado está em pânico ou capitulação. É quando a fase **ACUMULAR** fica ativa e sugere compras parciais da sua reserva-base.
+- **26 a 84 pontos:** Zona Neutra / Tendência (**MANTER**). O modelo não sugere vendas precipitadas nem compras caras. Apenas acompanhe a evolução do ciclo.
+- **85 a 100 pontos:** Zona de **Sobrecompra Extrema** (hora de realizar lucros). A escada de vendas é ativada em degraus (85 pts → 5%, 90 pts → 15%, 93 pts → 30%), sugerindo realizar lucro parcial antes que o ciclo inverta.
+"""
+        )
+
+    with st.expander("🔒 Como funciona a regra da Catraca (Ratchet)?"):
+        st.markdown(
+            """
+Dentro de um mesmo ciclo de alta, **a meta de venda acumulada nunca retrocede**. 
+Se o modelo sugeriu realizar 25% da sua posição no pico e o preço cair na semana seguinte, a meta continua em 25% (ela não volta para 15% nem manda recomprar). 
+
+Isso impede que você devolva os lucros realizados tentando adivinhar correções locais. O caixa fica protegido até que um **novo ciclo de acúmulo** comece formalmente.
+"""
+        )
+
+    with st.expander("📊 Como o BitSignal se conecta com a minha corretora ou carteira?"):
+        st.markdown(
+            """
+O BitSignal é **100% somente leitura** por princípio de segurança:
+1. Ele não pede chaves de API, senhas ou saldos bancários.
+2. Nenhuma ordem automática é enviada para corretoras.
+3. Você gerencia sua posição na sua própria planilha pessoal (ou usando a **Calculadora** integrada na aba *Semana* para simular os valores brutos).
+"""
+        )
+
+    with st.expander("📱 Como instalar o BitSignal como App no celular?"):
+        st.markdown(
+            """
+Você pode fixar o BitSignal como um aplicativo na tela inicial do seu smartphone:
+- **No iPhone (Safari):** Toque no botão de compartilhar (ícone de um quadrado com uma seta para cima) e selecione **"Adicionar à Tela de Início"**.
+- **No Android (Google Chrome):** Toque no menu de três pontos no canto superior direito e selecione **"Instalar aplicativo"** ou **"Adicionar à tela inicial"**.
+
+O painel passará a abrir em tela cheia, como um app nativo, sem barras de navegação!
+"""
+        )
 
 
 # --------------------------------------------------------------------------------------
@@ -387,7 +433,24 @@ def render_glossary():
 
 def main():
     """Render the dashboard. Called on every Streamlit run (including reruns)."""
-    st.set_page_config(page_title="BitSignal — Modelo de Ciclo", page_icon="⚡", layout="wide")
+    st.set_page_config(
+        page_title="BitSignal — Modelo de Ciclo",
+        page_icon="⚡",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+    )
+    st.markdown(
+        """
+        <head>
+            <meta name="apple-mobile-web-app-capable" content="yes">
+            <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+            <meta name="apple-mobile-web-app-title" content="BitSignal">
+            <meta name="mobile-web-app-capable" content="yes">
+            <meta name="theme-color" content="#0e1117">
+        </head>
+        """,
+        unsafe_allow_html=True,
+    )
     st.title("⚡ BitSignal — Modelo de Ciclo Unificado")
     st.caption(f"Painel experimental · {model_label(get_config())} · só leitura · não executa ordens · "
                "os percentuais são referências do modelo, não ordens.")
