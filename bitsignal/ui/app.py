@@ -49,7 +49,12 @@ from bitsignal.config import (  # noqa: E402
 from bitsignal.data import dune as dune_mod  # noqa: E402
 from bitsignal.data import spot as spot_mod  # noqa: E402
 from bitsignal.data.coinmetrics import DataUnavailable, fetch_coinmetrics  # noqa: E402
-from bitsignal.data.history import derive_daily, from_frame, load_frozen_history  # noqa: E402
+from bitsignal.data.history import (  # noqa: E402
+    derive_daily,
+    from_frame,
+    load_frozen_history,
+    load_live_or_incremental_history,
+)
 from bitsignal.engine.cycle import data_status, latest_verdict  # noqa: E402
 from bitsignal.engine.pipeline import run_model  # noqa: E402
 from bitsignal.models import DataStatus, InputState, Phase, ScoreStatus  # noqa: E402
@@ -88,9 +93,10 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-@st.cache_data(ttl=_BOOT.ui.cache_ttl_coinmetrics, show_spinner="Buscando o histórico da CoinMetrics…")
+@st.cache_data(ttl=_BOOT.ui.cache_ttl_coinmetrics, show_spinner="Atualizando dados da CoinMetrics…")
 def load_history():
-    return from_frame(fetch_coinmetrics(), source="coinmetrics_live", fetched_at=now_utc())
+    cfg = get_config()
+    return load_live_or_incremental_history(cfg.data.csv_path)
 
 
 @st.cache_data(ttl=_BOOT.ui.cache_ttl_coinmetrics, show_spinner=False)

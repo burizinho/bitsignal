@@ -227,13 +227,12 @@ def cmd_evaluate(args):
     """S7: print the verdict of the latest closed week from live CoinMetrics data."""
     from datetime import datetime, timezone
 
-    from bitsignal.data.coinmetrics import fetch_coinmetrics
-    from bitsignal.data.history import from_frame
+    from bitsignal.data.history import load_live_or_incremental_history
     from bitsignal.engine.cycle import latest_verdict
     from bitsignal.engine.pipeline import run_model
 
     cfg = _load_cfg(args)
-    history = from_frame(fetch_coinmetrics(), source="coinmetrics_live")
+    history = load_live_or_incremental_history(cfg.data.csv_path)
     result = run_model(history, cfg)
     v = latest_verdict(result, datetime.now(timezone.utc), cfg)
     print(f"Semana {v.week} · dados: {v.data_status.label}")
@@ -267,15 +266,14 @@ def cmd_record_verdict(args):
     shows the failure instead of recording a week without a verdict.
     """
     from bitsignal.config import repo_path
-    from bitsignal.data.coinmetrics import fetch_coinmetrics
-    from bitsignal.data.history import from_frame
+    from bitsignal.data.history import load_live_or_incremental_history
     from bitsignal.engine.cycle import latest_verdict
     from bitsignal.engine.pipeline import run_model
     from bitsignal.verdict_log import append_verdict, last_recorded_hash, verdict_row
 
     cfg = _load_cfg(args)
     now = _now_utc()
-    history = from_frame(fetch_coinmetrics(), source="coinmetrics_live")
+    history = load_live_or_incremental_history(cfg.data.csv_path)
     result = run_model(history, cfg)
     v = latest_verdict(result, now, cfg)
     if v.phase is None:

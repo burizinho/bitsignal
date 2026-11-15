@@ -47,5 +47,30 @@ def test_fetch_dune_latest_parses_last_row():
 
 
 def test_fetch_spot_returns_none_on_error():
-    with mock.patch("yfinance.Ticker", side_effect=RuntimeError("boom")):
+    with mock.patch("yfinance.Ticker", side_effect=RuntimeError("boom")), \
+            mock.patch("requests.get", side_effect=RuntimeError("boom")):
         assert spot.fetch_spot_usd() is None
+
+
+def test_fetch_spot_fallback_to_coinbase():
+    resp = mock.Mock()
+    resp.status_code = 200
+    resp.json.return_value = {"data": {"amount": "65123.45"}}
+    with mock.patch("yfinance.Ticker", side_effect=RuntimeError("boom")), \
+            mock.patch("requests.get", return_value=resp):
+        res = spot.fetch_spot_usd()
+        assert res is not None
+        assert res[0] == 65123.45
+
+
+def test_fetch_spot_fallback_to_binance():
+    resp_cb = mock.Mock()
+    resp_cb.status_code = 500
+    resp_bn = mock.Mock()
+    resp_bn.status_code = 200
+    resp_bn.json.return_value = {"price": "65456.78"}
+    with mock.patch("yfinance.Ticker", side_effect=RuntimeError("boom")), \
+            mock.patch("requests.get", side_effect=[resp_cb, resp_bn]):
+        res = spot.fetch_spot_usd()
+        assert res is not None
+        assert res[0] == 65456.78

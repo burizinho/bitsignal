@@ -10,6 +10,7 @@ from bitsignal.data.history import (
     derive_daily,
     from_frame,
     load_frozen_history,
+    load_live_or_incremental_history,
     write_frozen_history,
 )
 
@@ -93,3 +94,47 @@ def test_derive_daily_columns_and_warmup():
     assert d["mvrv_z"].iloc[:729].isna().all()
     assert d["picycle_bottom"].iloc[:470].isna().all()  # <NA> until SMA471 exists
     assert not (d[["mvrv_z", "puell", "sma111"]] == 50.0).any().any()
+
+
+def test_load_live_or_incremental_history_with_frozen_fallback(tmp_path):
+    from unittest import mock
+    from bitsignal.data.coinmetrics import DataUnavailable
+
+    csv_file = tmp_path / "base.csv"
+    df = _frame(days=10)
+    write_frozen_history(df, csv_file)
+
+    # When network fails, it falls back to frozen history without raising
+    with mock.patch("bitsignal.data.history.fetch_coinmetrics", side_effect=DataUnavailable("offline")):
+        h = load_live_or_incremental_history(csv_file)
+        assert h.source == "coinmetrics_frozen"
+        assert h.as_of == df.index[-1].date()
+
+
+def test_load_live_or_incremental_history_merges_new_rows(tmp_path):
+    from unittest import mock
+
+    csv_file = tmp_path / "base.csv"
+    df_base = _frame(days=10)
+    write_frozen_history(df_base, csv_file)
+
+    # Mock new row for the next day
+    next_day = df_base.index[-1] + pd.Timedelta(days=1)
+    df_new = pd.DataFrame(
+        {
+            "price": [9999.0],
+            "mc": [100000.0],
+            "mvrv_ratio": [2.5],
+            "iss_usd": [50.0],
+            "hashrate": [120.0],
+        },
+        index=pd.DatetimeIndex([next_day], name="date"),
+    )
+
+    with mock.patch("bitsignal.data.history.fetch_coinmetrics", return_value=df_new) as fake_fetch:
+        h = load_live_or_incremental_history(csv_file)
+        assert fake_fetch.called
+        assert fake_fetch.call_args.kwargs.get("start_time") == df_base.index[-1].date().isoformat()
+        assert h.source == "coinmetrics_live"
+        assert h.as_of == next_day.date()
+        assert h.daily.loc[next_day, "price"] == 9999.0

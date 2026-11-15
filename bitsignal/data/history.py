@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
 
 import pandas as pd
+import requests
 
 from bitsignal.config import Config, repo_path
-from bitsignal.data.coinmetrics import COLUMNS, METRICS, START, URL
+from bitsignal.data.coinmetrics import COLUMNS, METRICS, START, URL, DataUnavailable, fetch_coinmetrics
 from bitsignal.engine import indicators as ind
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,45 @@ def load_frozen_history(csv_path: Union[str, Path]) -> MarketHistory:
         fetched_at=datetime.fromisoformat(meta["fetched_at"]),
         csv_sha256=digest,
     )
+
+
+def load_live_or_incremental_history(
+    csv_path: Union[str, Path] = "data/historical/btc_coinmetrics.csv",
+    session: Optional[requests.Session] = None,
+) -> MarketHistory:
+    """Load historical base from frozen CSV and fetch only missing days from CoinMetrics.
+
+    If fetching incremental data fails (network/API issues), falls back gracefully to
+    frozen history. If no frozen history is present or invalid, falls back to full fetch.
+    """
+    path = repo_path(csv_path)
+    frozen: Optional[MarketHistory] = None
+    if path.is_file():
+        try:
+            frozen = load_frozen_history(path)
+        except Exception as exc:
+            logger.warning("Could not load frozen history base from %s: %s", path, exc)
+
+    if frozen is not None:
+        last_date_str = frozen.as_of.isoformat()
+        try:
+            new_df = fetch_coinmetrics(session=session, start_time=last_date_str)
+            if new_df.empty:
+                return frozen
+            # Concatenate frozen base and new rows, keeping the latest values for any overlapping dates
+            combined = pd.concat([frozen.daily, new_df])
+            combined = combined[~combined.index.duplicated(keep="last")].sort_index()
+            return from_frame(
+                combined,
+                source="coinmetrics_live",
+                fetched_at=datetime.now(timezone.utc),
+            )
+        except (requests.RequestException, DataUnavailable) as exc:
+            logger.warning("Failed to fetch incremental CoinMetrics data (%s); falling back to frozen history", exc)
+            return frozen
+
+    # Fallback to full fetch if no frozen base available
+    return from_frame(fetch_coinmetrics(session=session), source="coinmetrics_live")
 
 
 def compare_histories(live: MarketHistory, frozen: MarketHistory, rel_tol: float = 1e-6) -> pd.DataFrame:

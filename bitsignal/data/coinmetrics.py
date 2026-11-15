@@ -55,18 +55,22 @@ def _get_json(session: requests.Session, url: str, params: Optional[Dict[str, An
     raise DataUnavailable(f"CoinMetrics request failed after retries: {last_exc}")
 
 
-def fetch_coinmetrics(session: Optional[requests.Session] = None) -> pd.DataFrame:
-    """Fetch the 5 daily series since 2010-07-18.
+def fetch_coinmetrics(
+    session: Optional[requests.Session] = None,
+    start_time: Optional[str] = None,
+) -> pd.DataFrame:
+    """Fetch the 5 daily series since start_time (defaults to 2010-07-18).
 
     Returns a DataFrame indexed by ``date`` (the row ``time = D 00:00Z`` becomes date D, the
     close of day D) with float64 columns ``price, mc, mvrv_ratio, iss_usd, hashrate``.
     """
     sess = session or requests.Session()
+    effective_start = start_time or START
     params: Optional[Dict[str, Any]] = {
         "assets": "btc",
         "metrics": ",".join(METRICS),
         "frequency": "1d",
-        "start_time": START,
+        "start_time": effective_start,
         "page_size": PAGE_SIZE,
     }
     url: Optional[str] = URL
@@ -82,6 +86,8 @@ def fetch_coinmetrics(session: Optional[requests.Session] = None) -> pd.DataFram
         first = False
 
     if not rows:
+        if start_time and start_time != START:
+            return pd.DataFrame(columns=COLUMNS, index=pd.DatetimeIndex([], name="date")).astype("float64")
         raise DataUnavailable("CoinMetrics returned no rows")
     df = pd.DataFrame(rows)
     missing = [m for m in METRICS if m not in df.columns]
