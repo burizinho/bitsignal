@@ -127,3 +127,61 @@ def equity_chart(frames: Dict[str, pd.DataFrame], title: str = "Patrimônio (USD
         plot_bgcolor="rgba(0,0,0,0)",
     )
     return fig
+
+
+def score_history_chart(
+    weeks: pd.DataFrame,
+    arm_score: float = 25.0,
+    ladder: Sequence[Tuple[float, float]] = ((85.0, 0.05), (90.0, 0.15), (93.0, 0.30)),
+    title: str = "Histórico do Score de Valuation (0–100)",
+) -> go.Figure:
+    """Historical valuation score over time with accumulation and sell zones shaded."""
+    fig = go.Figure()
+
+    # Green accumulation band (0 to arm_score)
+    fig.add_hrect(
+        y0=0, y1=arm_score,
+        fillcolor="rgba(0, 168, 107, 0.15)", line_width=0,
+        annotation_text=f"Zona de Acúmulo (≤ {arm_score:.0f})",
+        annotation_position="bottom right",
+    )
+
+    # Orange/Red ladder zones
+    thresholds = [t for t, _ in ladder]
+    if thresholds:
+        first_t = thresholds[0]
+        fig.add_hrect(
+            y0=first_t, y1=100,
+            fillcolor="rgba(232, 93, 4, 0.12)", line_width=0,
+            annotation_text="Zona de Realização (≥ 85)",
+            annotation_position="top right",
+        )
+        for t in thresholds:
+            fig.add_hline(
+                y=t, line_dash="dash", line_color="rgba(232, 93, 4, 0.6)",
+                annotation_text=f"Degrau {t:.0f}", annotation_position="top left",
+            )
+
+    # Line of actual score
+    score_series = weeks["score"].fillna(weeks["score_min"])
+    fig.add_trace(
+        go.Scatter(
+            x=weeks.index,
+            y=score_series,
+            mode="lines",
+            name="Score de Valuation",
+            line=dict(color="#00B4D8", width=2),
+        )
+    )
+
+    fig.update_yaxes(range=[0, 100], title="Score (0–100)", gridcolor="rgba(128, 128, 128, 0.15)")
+    fig.update_xaxes(gridcolor="rgba(128, 128, 128, 0.15)")
+    fig.update_layout(
+        title=title,
+        height=350,
+        margin=dict(l=20, r=20, t=50, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig

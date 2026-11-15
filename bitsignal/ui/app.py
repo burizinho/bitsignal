@@ -28,7 +28,8 @@ for mod_name, mod_file in _files.items():
     if _changed or (mod_file and not mod_file.startswith(root_str)):
         sys.modules.pop(mod_name, None)
 
-from datetime import datetime, timezone  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from typing import Optional, Tuple  # noqa: E402
 import time  # noqa: E402
 
 import pandas as pd  # noqa: E402
@@ -150,13 +151,32 @@ def model_label(cfg) -> str:
     return "modelo v2 (reinvestimento do caixa)" if cfg.buys.on_reset == "all_cash" else "modelo v1"
 
 
-def render_spot():
+def next_weekly_close(now: datetime) -> Tuple[datetime, int, int]:
+    """Return next Sunday 23:59 UTC, days remaining, and hours remaining."""
+    days_ahead = 6 - now.weekday()
+    target = (now + timedelta(days=days_ahead)).replace(hour=23, minute=59, second=59, microsecond=0)
+    if target <= now:
+        target += timedelta(days=7)
+    diff = target - now
+    total_seconds = int(diff.total_seconds())
+    days = total_seconds // 86400
+    hours = (total_seconds % 86400) // 3600
+    return target, days, hours
+
+
+def render_spot(now: Optional[datetime] = None):
+    curr_now = now or now_utc()
     spot = cached_spot()
-    if spot is None:
-        st.caption("Preço agora (tempo real, somente exibição): indisponível.")
-    else:
-        price, ts = spot
-        st.caption(f"Preço agora (tempo real, somente exibição): US\\$ {price:,.0f} às {ts:%H:%M} UTC")
+    target, days, hours = next_weekly_close(curr_now)
+    c_left, c_right = st.columns(2)
+    with c_left:
+        if spot is None:
+            st.caption("Preço agora (tempo real, somente exibição): indisponível.")
+        else:
+            price, ts = spot
+            st.caption(f"Preço agora (tempo real, somente exibição): **US\\$ {price:,.0f}** às {ts:%H:%M} UTC")
+    with c_right:
+        st.caption(f"⏳ Próximo fechamento semanal: **{_d(target.date())} 23:59 UTC** (faltam {days}d {hours}h)")
 
 
 def render_calculator(verdict, week_close: float):
@@ -217,6 +237,67 @@ def render_unavailable(cfg, reason: str, context_history=None):
 
 def render_inputs(result, history, cfg):
     last = result.weeks.iloc[-1]
+
+    st.markdown("**Indicadores em Destaque**")
+    m1, m2, m3 = st.columns(3)
+
+    # 1. MVRV Z-Score
+    mvrv = last.get("mvrv_z")
+    if pd.notna(mvrv):
+        v_mvrv = float(mvrv)
+        hint_mvrv = "🟢 Fundo / Subavaliado" if v_mvrv < 0.1 else ("🔴 Sobrecomprado" if v_mvrv > 3.0 else "⚪ Zona Neutra")
+        m1.metric("MVRV Z-Score", f"{v_mvrv:.2f}", hint_mvrv)
+    else:
+        m1.metric("MVRV Z-Score", "—")
+
+    # 2. Preço / SMA 200w
+    p_sma200 = last.get("price_to_sma200w")
+    if pd.notna(p_sma200):
+        v_p200 = float(p_sma200)
+        hint_p200 = "🟢 Abaixo da média (fundo)" if v_p200 < 1.0 else ("🔴 Múltiplo elevado" if v_p200 > 2.5 else "⚪ Acima da média")
+        m2.metric("Preço / SMA 200w", f"{v_p200:.2f}x", hint_p200)
+    else:
+        m2.metric("Preço / SMA 200w", "—")
+
+    # 3. Puell Multiple
+    puell = last.get("puell")
+    if pd.notna(puell):
+        v_puell = float(puell)
+        hint_puell = "🟢 Capitulação mineradores" if v_puell < 0.5 else ("🔴 Emissão sobreaquecida" if v_puell > 1.5 else "⚪ Neutro")
+        m3.metric("Puell Multiple", f"{v_puell:.2f}", hint_puell)
+    else:
+        m3.metric("Puell Multiple", "—")
+
+    m4, m5, m6 = st.columns(3)
+
+    # 4. RSI Semanal (14)
+    rsi = last.get("rsi14w")
+    if pd.notna(rsi):
+        v_rsi = float(rsi)
+        hint_rsi = "🟢 Sobrevendido" if v_rsi < 45 else ("🔴 Sobrecomprado" if v_rsi > 75 else "⚪ Neutro")
+        m4.metric("RSI Semanal (14)", f"{v_rsi:.1f}", hint_rsi)
+    else:
+        m4.metric("RSI Semanal (14)", "—")
+
+    # 5. Pi Cycle Spread
+    pi_spd = last.get("picycle_spread")
+    if pd.notna(pi_spd):
+        v_pi = float(pi_spd)
+        hint_pi = "🔴 Risco de topo" if v_pi < 0 else "⚪ Normal"
+        m5.metric("Pi Cycle Spread", f"{v_pi:.1f}%", hint_pi)
+    else:
+        m5.metric("Pi Cycle Spread", "—")
+
+    # 6. Hash Ribbon
+    hr = last.get("hash_ribbon")
+    if pd.notna(hr):
+        hr_str = str(hr).upper()
+        hint_hr = "🟢 Sinal de Compra" if "BUY" in hr_str else ("🟡 Recuperação" if "REC" in hr_str else ("🔴 Capitulação" if "CAP" in hr_str else "⚪ Normal"))
+        m6.metric("Hash Ribbon", hr_str, hint_hr)
+    else:
+        m6.metric("Hash Ribbon", "—")
+
+    st.markdown("**Detalhamento dos Insumos**")
     rows = []
     for name in INPUT_KEYS:
         col = INPUT_VALUE_COL.get(name, name)
@@ -302,8 +383,18 @@ def render_what_would_change(result, cfg):
 def render_cycle(result, verdict, cfg):
     cycle_start = pd.Timestamp(verdict.cycle_start_date)
     weeks = result.weeks.loc[cycle_start:]
+    st.markdown("**Preço (escala log) e fases do ciclo**")
     st.plotly_chart(charts.price_phases_chart(result.weeks.iloc[-260:], result.events), width="stretch")
     st.caption(f"Recalculado em {now_utc():%d/%m/%Y %H:%M} UTC. {RECONSTRUCTION_NOTICE}")
+
+    st.markdown("**Evolução histórica do Score de Valuation**")
+    st.plotly_chart(
+        charts.score_history_chart(result.weeks.iloc[-260:], cfg.cycle.arm_score, cfg.sell_ladder),
+        width="stretch",
+    )
+    st.caption("Score de valuation ponderado (0–100) nas últimas 260 semanas (~5 anos).")
+
+    st.markdown("**Eventos do ciclo atual**")
     ev = [e for e in result.events if pd.Timestamp(e.date) >= cycle_start]
     if ev:
         st.dataframe(
