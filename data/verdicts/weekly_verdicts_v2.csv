@@ -1,3 +1,4 @@
 week,recorded_at,phase,sell_target,buy_pct,score,score_min,score_max,score_status,detector_level,reset_pending,cycle_start_date,price_usd,data_as_of,model_hash,reason
 2026-11-08,2026-11-09T22:56:08Z,ACCUMULATE,0.2500,0.0200,15.49,15.49,15.49,OK,0,true,2023-11-12,74967.72,2026-11-08,dc9ea76f235a1d8f52756b8db0b46d147f6c4dddc0434c84d52a67849d53cb6c,reinício armado em 2025-12-14; score_max 15.5 → compra 2%
 2026-11-15,2026-11-16T21:20:23Z,ACCUMULATE,0.2500,0.0200,14.17,14.17,14.17,OK,0,true,2023-11-12,65189.11,2026-11-15,dc9ea76f235a1d8f52756b8db0b46d147f6c4dddc0434c84d52a67849d53cb6c,reinício armado em 2025-12-14; score_max 14.2 → compra 2%
+2026-11-22,2026-11-23T22:58:26Z,ACCUMULATE,0.2500,0.0200,11.39,11.39,11.39,OK,0,true,2023-11-12,61103.71,2026-11-22,dc9ea76f235a1d8f52756b8db0b46d147f6c4dddc0434c84d52a67849d53cb6c,reinício armado em 2025-12-14; score_max 11.4 → compra 2%
